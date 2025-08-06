@@ -1,0 +1,4 @@
+
+# All pycache everywhere
+__pycache__
+*.py[cod]
