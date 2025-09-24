@@ -216,6 +216,12 @@ class VarisCapture:
     @cached_property
     def is_isotropic(self) -> bool:
         return self.num_phi_i == 1
+    
+    def __len__(self):
+        return len(self.frames)
+    
+    def _brightness_statistics_path(self) -> Path:
+        return self.dir_src / "statistics" / "brightness.h5"
 
     @property
     def is_symetric_along_X(self) -> bool:
@@ -267,6 +273,31 @@ class VarisCapture:
 
             if not handled and file.is_file():
                 self._handle_file_unmatched(file)
+
+    def _capture_from_files(cls, dir_src: Path):
+
+
+
+        prefix = r"Retro_([a-zA-Z]+)_rot(\d+)"
+        prefix_aniso = r"Retro_([a-zA-Z]+)_theta(\d+)-phi(\d+)"
+
+        self._ingest_files(dir_src, {
+            # Retroreflection brightness
+            fr"{prefix}_\.exr": partial(self._handle_file_measure, is_iso=True),
+            fr"{prefix_aniso}_\.exr": partial(self._handle_file_measure, is_iso=False),
+            # Single exposure photo per stage pose
+            fr"{prefix}_rectify\.jpg": partial(self._handle_file_anchor, is_iso=True),
+            fr"{prefix_aniso}_rectify\.jpg": partial(self._handle_file_anchor, is_iso=False),
+            # All lights
+            fr"{prefix}_gradientA_\.exr": partial(self._handle_file_all_lights, is_iso=True),
+            fr"{prefix_aniso}_gradientA255\.jpg": partial(self._handle_file_all_lights, is_iso=False),
+            # Normals estimated using gradient patterns
+            fr"{prefix}_normal01\.exr": partial(self._handle_file_grad_normals, is_iso=True),
+            fr"{prefix_aniso}_normal01\.exr": partial(self._handle_file_grad_normals, is_iso=False),
+            r"Normal_Retro_([a-zA-Z]+)_theta(\d+)-phi(\d+)\.exr": partial(self._handle_file_grad_normals, is_iso=False),
+        })
+
+
 
     def _update_name(self, frame_name: str):
         if self.name == "uninitialized":
