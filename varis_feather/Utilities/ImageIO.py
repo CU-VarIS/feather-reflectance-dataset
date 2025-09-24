@@ -12,23 +12,24 @@
 import os
 os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 # os.environ["COLOUR_SCIENCE__COLOUR__IMPORT_VAAB_COLOUR"] = "1"
-import cv2 as cv
-from PIL import Image
-import subprocess
-from pathlib import Path
-import time
-import numpy as np
-import glob
-import colour
-import skimage.transform as skt
-import imageio as iio
-iio.plugins.freeimage.download()
 
+import glob
+import time
+from pathlib import Path
+
+import colour
+import cv2 as cv
+import numpy as np
+import skimage.transform as skt
+from PIL import Image
+
+# import imageio as iio
+# iio.plugins.freeimage.download()
 # From copying over lib/python/site-packages/OpenImageIO from brew install openimageio
 # BUT WITH WRONG ARCHITECTURE
 #import OpenImageIO as oiio
 
-from . import Math as UM
+from .Math import printStats
 
 PIXEL_MAX = 2000
 
@@ -133,7 +134,7 @@ def rotate90(img):
 
 # Read image EXIF metadata as a dictionary.
 def readImageEXIF(imagePath):
-    from PIL import Image, ExifTags
+    from PIL import ExifTags, Image
     img = Image.open(imagePath)
     #exif = img._getexif()
     # https://stackoverflow.com/questions/4764932/in-python-how-do-i-read-the-exif-data-for-an-image
@@ -468,7 +469,7 @@ def writeImage(img, savePath, extOut=None, verbose:bool = True):
     # OpenCV seems more reliable for JPGs?
     if extOut.lower() in {"jpg", "png", "webp"}:
         if verbose:
-            UM.printStats(img, 'img')
+            printStats(img, 'img')
         #img = cv.cvtColor(img, cv.COLOR_BGR2RGB)
         #cv.imwrite(savePath, img)
         if img.dtype != np.uint8:
@@ -522,7 +523,7 @@ def testEXRPrecision():
     imgPathOrig = f'{folder}/TestEXR.exr'
 
     imgOrig = readImage(imgPathOrig, 'exr')
-    UM.printStats(imgOrig, 'init reading', filterNan=True)
+    printStats(imgOrig, 'init reading', filterNan=True)
 
     imgOrig = np.nan_to_num(imgOrig)
     imgOrig_f16 = imgOrig.astype(np.float16)

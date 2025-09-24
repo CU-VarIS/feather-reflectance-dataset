@@ -6,9 +6,10 @@ from xml.dom import minidom
 import numpy as np
 from tqdm import tqdm
 
-from .capture import VarisCapture, OLATFrame
-from .retro import RetroreflectionCapture
 from ..Utilities.ImageIO import readImage, writeImage
+from .capture import CaptureFrame, VarisCapture
+from .retro import RetroreflectionCapture
+
 
 @dataclass
 class BRDFMeasurementBundle:
@@ -99,7 +100,7 @@ class OLATRegionView:
     def _extract_crop(self, frame_full_image: np.ndarray) -> np.ndarray:
         return frame_full_image[self.crop_slice]
 
-    def add_sample(self, frame: OLATFrame, frame_full_image: np.ndarray) -> np.ndarray:
+    def add_sample(self, frame: CaptureFrame, frame_full_image: np.ndarray) -> np.ndarray:
         crop = self._extract_crop(frame_full_image)
         self._block_slice_view(frame.wiid, frame.dmx_id, frame.light_id)[:] = crop
         return crop

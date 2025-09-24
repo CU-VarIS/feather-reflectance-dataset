@@ -1,23 +1,22 @@
+import re
 from concurrent.futures import as_completed
 from dataclasses import dataclass
+from functools import cached_property, partial
 from multiprocessing import Pool
 from pathlib import Path
-from functools import cached_property, partial
-import re
 from typing import Any, Optional
-
-from matplotlib import pyplot
 
 import numpy as np
 import pandas
+from matplotlib import pyplot
 from scipy.spatial import KDTree
 from tqdm import tqdm
 
-from .olat_subcrops import OLATPixelMaskView
-from .light_index import DomeLightIndex
-from .capture import VarisCapture, OLATFrame, OLATStagePose, ThetaDistribution
-from ..Utilities.show_image import image_montage_same_shape
 from ..Utilities.ImageIO import RGL_tonemap_uint8, readImage, writeImage
+from ..Utilities.show_image import image_montage_same_shape
+from .capture import CaptureFrame, CaptureStagePose, ThetaDistribution, VarisCapture
+from .light_index import DomeLightIndex
+from .olat_subcrops import OLATPixelMaskView
 
 
 @dataclass
@@ -96,12 +95,6 @@ class OLATCapture(VarisCapture):
         self._derive_frame_coordinates(invalid=frame_below_horizon)
         self._build_stage_pose_index()
 
-        if white_level_analysis:
-            from Space.capture_shadows_macro import white_level_analysis_ensure
-            try:
-                white_level_analysis_ensure(self)
-            except Exception as e:
-                print("White level analysis failed:", e)
 
         if drop_outliers:
             self._drop_outliers()
@@ -125,7 +118,7 @@ class OLATCapture(VarisCapture):
         light_id = int(light_id)
 
         self.frames.append(
-            OLATFrame(
+            CaptureFrame(
                 dmx_id=dmx_id,
                 light_id=light_id,
                 theta_i=theta_i,
@@ -185,7 +178,7 @@ class OLATCapture(VarisCapture):
         di = DomeLightIndex.default_instance
 
         self.frames = [
-            OLATFrame(
+            CaptureFrame(
                 dmx_id=dmx_id,
                 light_id=light_id,
                 theta_i=self.olat_theta_i[theta_id],
@@ -201,7 +194,7 @@ class OLATCapture(VarisCapture):
         ]
 
         self.stage_poses = {
-            (theta_id, phi_id): OLATStagePose(theta_i_index=theta_id, phi_i_index=phi_id)
+            (theta_id, phi_id): CaptureStagePose(theta_i_index=theta_id, phi_i_index=phi_id)
             for phi_id in range(self.num_phi_i)
             for theta_id in range(self.num_theta_i)
         }         

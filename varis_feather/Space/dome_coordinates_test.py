@@ -1,5 +1,5 @@
-from matplotlib import pyplot
 import numpy as np
+from matplotlib import pyplot
 
 from .dome_coordinates import DomeCoordinates
 from .light_index import DomeLightIndex

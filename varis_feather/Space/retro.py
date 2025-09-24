@@ -6,9 +6,8 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
-from ..Utilities.ImageIO import readImage, writeImage, RGL_tonemap
-
-from .capture import ThetaDistribution, VarisCapture, OLATFrame
+from ..Utilities.ImageIO import RGL_tonemap, readImage, writeImage
+from .capture import CaptureFrame, ThetaDistribution, VarisCapture
 from .sample_coordinates import u_to_theta
 
 # class RetroAllLightNaming:
@@ -43,7 +42,7 @@ class RetroreflectionCapture(VarisCapture):
         wi_id = (int(theta_id), int(phi_id))
 
         self.frames.append(
-            OLATFrame(
+            CaptureFrame(
                 wiid=wi_id,
                 theta_i=self.olat_theta_i[wi_id[0]],
                 phi_i=self.olat_phi_i[wi_id[1]],

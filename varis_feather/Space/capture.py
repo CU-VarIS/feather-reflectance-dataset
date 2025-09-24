@@ -1,22 +1,20 @@
+import re
 from dataclasses import dataclass
-from enum import Enum
 from functools import cached_property, lru_cache
 from pathlib import Path
-import re
 from typing import Any, Literal, Optional, Union
 
+import cv2 as cv
 import einops
-from matplotlib import pyplot
-from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 import numpy as np
+import seaborn
+from matplotlib import pyplot
+from matplotlib.offsetbox import AnnotationBbox, OffsetImage
 from scipy.spatial import KDTree
 from scipy.spatial.transform import Rotation
-import seaborn
 from tqdm import tqdm
-import cv2 as cv
 
 from ..Utilities.ImageIO import RGL_tonemap_uint8, readImage, writeImage
-
 
 
 class ThetaDistribution:
@@ -31,9 +29,9 @@ class ThetaDistribution:
     
 
 @dataclass
-class OLATFrame:
+class CaptureFrame:
     """
-    An photo in the OLAT (one light at a time) capture
+    An photo measuring the reflectance of the sample under controlled light and viewing directions.
     """
 
     # Which single light was on
@@ -71,7 +69,7 @@ class OLATFrame:
         return self.wiid
 
 @dataclass
-class OLATStagePose:
+class CaptureStagePose:
     """
     Description of a particular pose of the stage shared by a set of images.
     For a given pose, we capture an image for each light, resulting in around 200 images.
@@ -278,12 +276,12 @@ class VarisCapture:
 
     def get_stage_pose(
         self, wi_id: tuple[int, int], name: str = "", create: bool = False
-    ) -> OLATStagePose | None:
+    ) -> CaptureStagePose | None:
         sp = self.stage_poses.get(wi_id)
 
         if sp is None and create:
             theta_i, phi_i = wi_id
-            sp = OLATStagePose(
+            sp = CaptureStagePose(
                 theta_i_index=theta_i,
                 theta_i=self.olat_theta_i[theta_i],
                 phi_i_index=phi_i,
@@ -309,8 +307,8 @@ class VarisCapture:
         self.name = "uninitialized"
         self.dir_src = dir_src
         self._set_angles(num_theta_i, num_phi_i, theta_distribution=theta_distribution)
-        self.stage_poses: dict[tuple[int, int], OLATStagePose] = {}
-        self.frames: list[OLATFrame] = []
+        self.stage_poses: dict[tuple[int, int], CaptureStagePose] = {}
+        self.frames: list[CaptureFrame] = []
         self.img_full_size_mm = img_full_size_mm
         self.pix_per_mm = pix_per_mm
         self.mm_per_tile = mm_per_tile
@@ -358,8 +356,8 @@ class VarisCapture:
     #     # return img[roi_tl[1]:roi_tl[1]+roi_wh[1], roi_tl[0]:roi_tl[0]+roi_wh[0]]
     #     return slice(roi_tl[1], roi_tl[1]+roi_wh[1]), slice(roi_tl[0], roi_tl[0]+roi_wh[0])
 
-    def read_measurement_image(self, frame: Union[OLATFrame, int], cache=False) -> np.ndarray:
-        frame = frame if isinstance(frame, OLATFrame) else self.frames[int(frame)]
+    def read_measurement_image(self, frame: Union[CaptureFrame, int], cache=False) -> np.ndarray:
+        frame = frame if isinstance(frame, CaptureFrame) else self.frames[int(frame)]
 
         if cache and frame.image_cache is not None:
             return frame.image_cache
@@ -657,7 +655,7 @@ class VarisCapture:
 
         return plot
 
-    def _plot_board_gradient_normals_for_sp(self, sp: OLATStagePose):
+    def _plot_board_gradient_normals_for_sp(self, sp: CaptureStagePose):
         anchor_img = sp.anchor_image
 
         radius = round(min(anchor_img.shape[:2]) // 2 - 64 - 128)
@@ -941,34 +939,3 @@ class VarisCaptureCroppedView:
 
         return self._cache[index]
 
-def load_standard_capture(cap_name, retro_kwargs: None | dict[str, Any] = None, olat_kwargs: None | dict[str, Any] = None) -> tuple[VarisCapture, VarisCapture]:
-    from Paths import PATH_DATA
-    from Space.olat import OLATCapture, ThetaDistribution
-    from Space.retro import RetroreflectionCapture
-
-    dir_retro = PATH_DATA / "Retroreflection" / "128x1" / cap_name
-    dir_olat = PATH_DATA / "FullScattering" / cap_name
-
-
-    retro = RetroreflectionCapture(
-        dir_src = dir_retro,
-        num_theta_i=128,
-        num_phi_i=1,
-        # theta_distribution=ThetaDistribution(mode=ThetaDistribution.MODE_U_TO_THETA, offset_rad=np.deg2rad(10.43)),
-        frame_below_horizon="ignore",
-        **(retro_kwargs or {}),
-    )
-    print(retro.report())
-
-    olat = OLATCapture(
-        dir_src = dir_olat,
-        num_theta_i=8,
-        num_phi_i=1,    
-        # theta_distribution=ThetaDistribution(mode=ThetaDistribution.MODE_UNIFORM, offset_rad=np.deg2rad(16.35)),
-        # frame_below_horizon="remove",
-        theta_distribution=ThetaDistribution(mode=ThetaDistribution.MODE_UNIFORM),
-        frame_below_horizon="ignore",
-        **(olat_kwargs or {}),
-    )
-    print(olat.report())
-    return retro, olat
