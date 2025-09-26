@@ -50,13 +50,13 @@ class RetroreflectionCapture(VarisCapture):
             )
         )
         # ensure the stage pose is allocated
-        sp = self.get_stage_pose(wi_id, name=name, create=True)
+        sp = self._get_stage_pose(wi_id, name=name, create=True)
 
         assert sp.frame_indices is None
         sp.frame_indices = np.array([len(self.frames) - 1], dtype=np.int32)
 
 
-    def _load_frames_from_dir(self, dir_src: Path):
+    def _load_frames_from_dir_without_index(self, dir_src: Path):
         """
         Kind_Name_Pose_Image
 
@@ -113,10 +113,12 @@ class RetroreflectionCapture(VarisCapture):
         })
 
 
+
     def __init__(self, 
             dir_src, 
             num_theta_i,     # TODO rename to num_theta_r and num_phi_r
             num_phi_i,
+            use_index=True,
             frame_below_horizon="error",
             theta_distribution=ThetaDistribution(mode=ThetaDistribution.MODE_U_TO_THETA),
 
@@ -124,24 +126,20 @@ class RetroreflectionCapture(VarisCapture):
         dir_src = Path(dir_src)
         super().__init__(dir_src=dir_src, num_theta_i=num_theta_i, num_phi_i=num_phi_i, theta_distribution=theta_distribution)
 
-        # self.naming_pattern_all_light = str(naming_all_light)
-        self._load_frames_from_dir(dir_src)
-
-        if not self.frames:
-            # raise ValueError(f"No frames found in directory {dir_src}")
-            print(f"No frames found in directory {dir_src}")
-        else:
-            self._derive_frame_coordinates(invalid=frame_below_horizon)
+        if (not use_index) or not self.load_index():
+            self._load_frames_from_dir_without_index(dir_src)
+            self._derive_frame_coordinates()
 
 
-    def _derive_frame_coordinates(self, invalid = "error"):
+
+    def _derive_frame_coordinates(self):
 
         for frame in self.frames:
             r_to_sample = self.make_R_domeEnvYUp_to_sample(frame.theta_i, frame.phi_i)
             frame.r_dome_to_sample = r_to_sample
             frame.sample_wo = frame.sample_wi = r_to_sample.apply(np.array([0, 0, -1]))
 
-        super()._derive_frame_coordinates(invalid)
+        super()._derive_frame_coordinates()
 
     def measure_image_for_pose(self, wiid: tuple[int, int], view=None, tonemap=False) -> np.ndarray:
         """

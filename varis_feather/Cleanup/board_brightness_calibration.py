@@ -24,6 +24,13 @@ from ..Utilities.Pixels import marker_mask_from_image
 from ..Utilities.show_image import image_montage_same_shape, show
 
 
+
+
+
+
+
+
+
 @dataclass
 class FrameBrightnessStatistics:
     board_visible_fraction: np.ndarray
@@ -73,10 +80,14 @@ class FrameBrightnessStatistics:
 
         marker_white_pixels = frame_measurement[board_mask_intersection]
 
+        marker_white_intensity = np.mean(marker_white_pixels, axis=1)
+        marker_white_intensity_mean = np.mean(marker_white_intensity)
+        marker_white_intensity_std = np.std(marker_white_intensity)
+
         marker_white_rgb_mean = np.mean(marker_white_pixels, axis=0)
         marker_white_rgb_std = np.std(marker_white_pixels, axis=0)
 
-        return fr_id, board_visible_fraction, marker_white_rgb_mean, marker_white_rgb_std
+        return fr_id, board_visible_fraction, marker_white_intensity_mean, marker_white_intensity_std, marker_white_rgb_mean, marker_white_rgb_std
 
     @classmethod
     def from_markers(cls, capture: VarisCapture) -> "FrameBrightnessStatistics":
@@ -95,7 +106,7 @@ class FrameBrightnessStatistics:
 
 
             for i, fraction in tqdm(enumerate(as_completed(futures)), total=len(futures), desc="Extracting marker brightness"):
-                fr_id, board_visible_fraction, marker_white_rgb_mean, marker_white_rgb_std = fraction.result()
+                fr_id, board_visible_fraction, marker_white_intensity_mean, marker_white_intensity_std, marker_white_rgb_mean, marker_white_rgb_std = fraction.result()
                 stats.board_visible_fraction[fr_id] = board_visible_fraction
                 stats.marker_white_rgb_mean[fr_id] = marker_white_rgb_mean
                 stats.marker_white_rgb_std[fr_id] = marker_white_rgb_std
@@ -292,7 +303,6 @@ def dataset_opt(capture: VarisCapture, n_iters = 3, stats_override: Optional[Fra
     stats_rgb_std = stats.marker_white_rgb_std[fr_idx_mask_valid]
     stats_white_mean = np.mean(stats_rgb_mean, axis=1)
     stats_white_std = np.mean(stats_rgb_std, axis=1)
-    color = RGL_tonemap(stats.marker_white_rgb_mean[fr_idx_mask_valid])
     wos = capture.frame_wo[fr_idx_mask_valid]
 
 

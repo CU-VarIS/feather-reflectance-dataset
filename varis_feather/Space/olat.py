@@ -75,11 +75,11 @@ class OLATCapture(VarisCapture):
             num_phi_i: int = 1,
             frame_below_horizon="error",
             symmetrize_light_directions_if_isotropic=True,
-            synthetic=False,
             conflate_phis=False,
             white_level_analysis=True,
             drop_outliers=True,
-            theta_distribution: ThetaDistribution=ThetaDistribution(mode=ThetaDistribution.MODE_ARC_COS, offset_rad=0.0)
+            use_index=True,
+            theta_distribution: ThetaDistribution=ThetaDistribution(mode=ThetaDistribution.MODE_ARC_COS, offset_rad=0.0),
         ):
             
         dir_src = Path(dir_src)
@@ -87,24 +87,24 @@ class OLATCapture(VarisCapture):
         self.conflate_phis = conflate_phis
         self._symmetrize_light_directions_if_isotropic = symmetrize_light_directions_if_isotropic
 
-        if synthetic:
-            self._load_frames_synthetic(dir_src)
-        else:
-            self._load_frames_from_dir(dir_src)
+        if (not use_index) or  not self.load_index():
+            self._load_frames_from_dir_without_index(dir_src)
+            self._derive_frame_coordinates()
 
-        self._derive_frame_coordinates(invalid=frame_below_horizon)
         self._build_stage_pose_index()
 
 
-        if drop_outliers:
-            self._drop_outliers()
+        # if drop_outliers:
+            # self._drop_outliers()
 
-        self._build_query_index()
+        # self._build_query_index()
 
         self.named_region_views : dict[str, "OLATRegionView"]= {}
         self.load_named_regions(dir_src)
 
         print(f"OLAT: {len(self.frames)} frames in {dir_src}")
+
+        
 
     def _add_frame(self, path:Path, name:str, theta_id:str, phi_id:str, dmx_id:str, light_id:str):
         wi_id = (int(theta_id), int(phi_id))
@@ -128,7 +128,7 @@ class OLATCapture(VarisCapture):
             )
         )
         # ensure the stage pose is allocated
-        self.get_stage_pose(wi_id, name=name, create=True)
+        self._get_stage_pose(wi_id, name=name, create=True)
 
 
     def _handle_file_olat(self, path: Path, match: re.Match, is_iso=False):
@@ -141,7 +141,7 @@ class OLATCapture(VarisCapture):
         self._add_frame(path, name, theta_id, phi_id, dmx_id, light_id)
 
 
-    def _load_frames_from_dir(self, dir_src: Path):
+    def _load_frames_from_dir_without_index(self, dir_src: Path):
         RE_OLAT_FILE = r"Full_([a-zA-Z]+)_wi(\d+)_dmx(\d+)_light(\d+)_\.exr"
         RE_OLAT_FILE_ANISO = r"Full_([a-zA-Z]+)_thetaI(\d+)-phiI(\d+)_dmx(\d+)_light(\d+)_\.exr"
         # Photo with all lights on, for alignment, ie "Full_ButterflySwallowtailAniso_thetaI000-phiI000.jpg"
@@ -214,7 +214,7 @@ class OLATCapture(VarisCapture):
         # Uniformly spaced phi distribution
         self.olat_phi_i = np.linspace(-np.pi, np.pi, num_phi_i, endpoint=False)
         
-    def _derive_frame_coordinates(self, invalid = "error"):
+    def _derive_frame_coordinates(self):
         di = DomeLightIndex.default_instance
 
         for frame in self.frames:
@@ -223,6 +223,11 @@ class OLATCapture(VarisCapture):
             r_to_sample = self.make_R_domeEnvYUp_to_sample(frame.theta_i, frame.phi_i)
             # print('rotation matrix', r_to_sample.as_matrix())
             frame.r_dome_to_sample = r_to_sample
+
+        for frame in self.frames:
+            r_to_sample = self.make_R_domeEnvYUp_to_sample(frame.theta_i, frame.phi_i)
+            frame.r_dome_to_sample = r_to_sample
+            frame.sample_wo = frame.sample_wi = r_to_sample.apply(np.array([0, 0, -1]))
 
             # Find and transform light direction
             table_idx = di.get_index(frame.dmx_id, frame.light_id)
@@ -241,7 +246,7 @@ class OLATCapture(VarisCapture):
             #     frame.sample_wo[1] = np.abs(frame.sample_wo[1])
             #     print("isotropic ", frame.sample_wi)
 
-        super()._derive_frame_coordinates(invalid)
+        super()._derive_frame_coordinates()
 
 
 
@@ -282,17 +287,17 @@ class OLATCapture(VarisCapture):
          {(0, 0): [0, 1, 2, ...], (0, 1): [3, 4, 5, ...], (0, 2): [6, 7, 8, ...]
         https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.groupby.html
         """
-        frame_indices_by_wiid = pandas.DataFrame(self.frame_wi_index).groupby([0, 1]).groups
+        frame_indices_by_wiid = self.frame_table.reset_index(drop=True).groupby(["theta_id", "phi_id"]).groups
 
         for wiid, frame_indices in frame_indices_by_wiid.items():
             sp = self.stage_poses[wiid]
             sp.frame_indices = np.array(frame_indices)
 
-    def _drop_outliers(self):
-        for sp in self.stage_poses.values():
-            mask = np.array([self.frames[i].is_valid for i in sp.frame_indices])
-            print(f"Wiid{sp.wiid}: dropped outliers {np.count_nonzero(~mask)}/{len(mask)}")
-            sp.frame_indices = sp.frame_indices[mask]
+    # def _drop_outliers(self):
+    #     for sp in self.stage_poses.values():
+    #         mask = np.array([self.frames[i].is_valid for i in sp.frame_indices])
+    #         print(f"Wiid{sp.wiid}: dropped outliers {np.count_nonzero(~mask)}/{len(mask)}")
+    #         sp.frame_indices = sp.frame_indices[mask]
 
 
 

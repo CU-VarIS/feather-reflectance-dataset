@@ -7,6 +7,7 @@ from typing import Any, Literal, Optional, Union
 import cv2 as cv
 import einops
 import numpy as np
+from pandas import DataFrame, read_csv
 import seaborn
 from matplotlib import pyplot
 from matplotlib.offsetbox import AnnotationBbox, OffsetImage
@@ -15,7 +16,7 @@ from scipy.spatial.transform import Rotation
 from tqdm import tqdm
 
 from ..Utilities.ImageIO import RGL_tonemap_uint8, readImage, writeImage
-
+from ..Cleanup.board_markers_brightness import capture_calculate_marker_brightness
 
 class ThetaDistribution:
     MODE_ARC_COS = "arc_cos"
@@ -34,14 +35,14 @@ class CaptureFrame:
     An photo measuring the reflectance of the sample under controlled light and viewing directions.
     """
 
+    # Viewing direction
+    wiid: tuple[int, int] = (-1, 0)
+    theta_i: float = np.nan
+    phi_i: float = np.nan
+
     # Which single light was on
     dmx_id: int = -1
     light_id: int = -1
-
-    # Incident direction
-    wiid: tuple[int, int] = (-1, 0)
-    theta_i: float = -1.0
-    phi_i: float = -1.0
 
     # Transformation from dome space to sample space
     r_dome_to_sample: Rotation | None = None
@@ -53,20 +54,65 @@ class CaptureFrame:
     image_path: Path | None = None
     image_cache: np.ndarray | None = None
 
-    is_valid_macro_shadow: bool = True
+    is_valid: bool = True
+    brightness_correction: float = 1.0
+
     white_marker_visible_fraction: float | None = None
     white_marker_intensity_mean: float | None = None
     white_marker_intensity_std: float | None = None
-    # white_marker_color_mean: np.ndarray | None = None
-    # white_marker_color_std: np.ndarray | None = None
-
-    @property
-    def is_valid(self) -> bool:
-        return self.is_valid_macro_shadow
+    white_marker_rgb_mean: np.ndarray | None = None
     
     @property
     def incident_direction_preset_idx(self):
         return self.wiid
+
+    @staticmethod
+    def _vector_into_elements(v: np.ndarray, name: str, elements = "xyz") -> dict[str, float]:
+        v = v if v is not None else np.full((len(elements),), np.nan)
+        return {f"{name}_{colname}": float(val) for colname, val in zip(elements, v)}
+
+    def asdict(self) -> dict[str, Any]:
+        return {
+            "theta_id": self.wiid[0], 
+            "phi_id": self.wiid[1], 
+            "dmx_id": self.dmx_id, 
+            "light_id": self.light_id,
+            "image_name": self.image_path.name,
+            "is_valid": self.is_valid,
+            "brightness_correction": self.brightness_correction,
+            "white_marker_visible_fraction": self.white_marker_visible_fraction,
+            "white_marker_intensity_mean": self.white_marker_intensity_mean,
+            "white_marker_intensity_std": self.white_marker_intensity_std,
+            **self._vector_into_elements(self.white_marker_rgb_mean, "white_marker_rgb_mean", elements="rgb"),
+            **self._vector_into_elements(self.sample_wi, "sample_wi"),
+            **self._vector_into_elements(self.sample_wo, "sample_wo"),
+        }
+
+    @staticmethod
+    def _vector_from_parts(row: Union[DataFrame, dict], name: str, elements = "xyz") -> np.ndarray | None:
+        if f"{name}_{elements[0]}" not in row:
+            return None
+        else:
+            return np.array([row[f"{name}_{c}"] for c in elements], dtype=np.float32)
+
+    @classmethod
+    def from_row(cls, row: Union[DataFrame, dict]) -> "CaptureFrame":
+        return cls(
+            wiid=(int(row.get("theta_id", 0)), int(row.get("phi_id", 0))),
+            dmx_id=int(row.get("dmx_id", -1)),
+            light_id=int(row.get("light_id", -1)),
+            image_path=Path(row.get("image_name")),
+            theta_i=float(row.get("theta_i", np.nan)),
+            phi_i=float(row.get("phi_i", np.nan)),
+            is_valid=bool(row.get("is_valid", True)),
+            brightness_correction=float(row.get("brightness_correction", 1.0)),
+            white_marker_visible_fraction=float(row.get("white_marker_visible_fraction", np.nan)),
+            white_marker_intensity_mean=float(row.get("white_marker_intensity_mean", np.nan)),
+            white_marker_intensity_std=float(row.get("white_marker_intensity_std", np.nan)),
+            white_marker_rgb_mean=cls._vector_from_parts(row, "white_marker_rgb_mean", elements="rgb"),
+            sample_wi=cls._vector_from_parts(row, "sample_wi"),
+            sample_wo=cls._vector_from_parts(row, "sample_wo"),
+        )
 
 @dataclass
 class CaptureStagePose:
@@ -81,10 +127,8 @@ class CaptureStagePose:
 
     theta_i_index: int
     phi_i_index: int
-    theta_i: float
-    phi_i: float
-
-    name: str = ""
+    theta_i: float = np.nan
+    phi_i: float = np.nan
 
     all_lights_image_path: Path | None = None
     normals_image_path: Path | None = None
@@ -213,6 +257,7 @@ class VarisCapture:
     def num_phi_i(self) -> int:
         return len(self.olat_phi_i)
 
+
     @cached_property
     def is_isotropic(self) -> bool:
         return self.num_phi_i == 1
@@ -227,9 +272,61 @@ class VarisCapture:
     def is_symetric_along_X(self) -> bool:
         """Whether to duplicate light directions along the Y axis for isotropic captures."""
         return False
+    
+    def _frame_vector_property(self, name: str, elements="xyz") -> np.ndarray:
+        return self.frame_table[[f"{name}_{elem}" for elem in elements]].to_numpy()
+
+    @property
+    def sample_wi(self) -> np.ndarray:
+        return self._frame_vector_property("sample_wi")
+    
+    @property
+    def sample_wo(self) -> np.ndarray:
+        return self._frame_vector_property("sample_wo")
+
+    @property
+    def frame_wi_index(self) -> np.ndarray:
+        return self.frame_table[["theta_id", "phi_id"]].to_numpy(dtype=np.int32)
+
+    @property
+    def frame_dmx_light_ids(self) -> np.ndarray:
+        return self.frame_table[["dmx_id", "light_id"]].to_numpy(dtype=np.int32)
+
+    @property
+    def white_marker_rgb_mean(self) -> np.ndarray:
+        return self._frame_vector_property("white_marker_rgb_mean", elements="rgb")
+    
+    @property
+    def white_marker_intensity_mean(self) -> np.ndarray:
+        return self.frame_table["white_marker_intensity_mean"].to_numpy()
 
     def _set_angles(self, num_theta_i, num_phi_i, theta_distribution: ThetaDistribution):
         raise NotImplementedError("Provide implementation for self.olat_theta_i and self.olat_phi_i")
+
+
+    def _get_stage_pose(
+        self, wi_id: tuple[int, int], name: str = "", create: bool = False
+    ) -> CaptureStagePose | None:
+        sp = self.stage_poses.get(wi_id)
+
+        if sp is None and create:
+            theta_i, phi_i = wi_id
+            sp = CaptureStagePose(
+                theta_i_index=theta_i,
+                phi_i_index=phi_i,
+            )
+            self.stage_poses[wi_id] = sp
+
+        self._update_name(name)
+
+        return sp
+
+    def _update_name(self, frame_name: str):
+        if self.name == "uninitialized":
+            self.name = frame_name
+        elif self.name != frame_name:
+            print(f"Frame name '{frame_name}' does not match previously loaded '{self.name}'")
+
 
     def _handle_file_all_lights(self, path: Path, match: re.Match, is_iso=False):
         if is_iso:
@@ -238,7 +335,7 @@ class VarisCapture:
         else:
             name, theta_id, phi_id = match.groups()
         wi_id = (int(theta_id), int(phi_id))
-        self.get_stage_pose(wi_id, name=name, create=True).all_lights_image_path = path
+        self._get_stage_pose(wi_id, name=name, create=True).all_lights_image_path = path
 
     def _handle_file_grad_normals(self, path: Path, match: re.Match, is_iso=False):
         if is_iso:
@@ -247,7 +344,7 @@ class VarisCapture:
         else:
             name, theta_id, phi_id = match.groups()
         wi_id = (int(theta_id), int(phi_id))
-        self.get_stage_pose(wi_id, name=name, create=True).normals_image_path = path
+        self._get_stage_pose(wi_id, name=name, create=True).normals_image_path = path
 
     def _handle_file_anchor(self, path: Path, match: re.Match, is_iso=False):
         if is_iso:
@@ -257,73 +354,118 @@ class VarisCapture:
             name, theta_id, phi_id = match.groups()
 
         wi_id = (int(theta_id), int(phi_id))
-        self.get_stage_pose(wi_id, name=name, create=True).anchor_image_path = path
+        self._get_stage_pose(wi_id, name=name, create=True).anchor_image_path = path
 
     def _handle_file_unmatched(self, path: Path):
         self._unmatched_files.setdefault(re.sub(r"\d", "#", path.name), []).append(path)
 
     def _ingest_files(self, dir_src: Path, handlers: dict[str, callable]):
         for file in sorted(dir_src.iterdir()):
-            handled = False
-            for pattern, handler in handlers.items():
-                if m := re.match(pattern, file.name):
-                    handler(file, m)
-                    handled = True
-                    break
-
-            if not handled and file.is_file():
+            if file.is_file():
+                for pattern, handler in handlers.items():
+                    if m := re.match(pattern, file.name):
+                        handler(file, m)
+                        continue
                 self._handle_file_unmatched(file)
 
-    def _capture_from_files(cls, dir_src: Path):
+
+    def save_index(self):
+        path_out = self.dir_src / "index_frames.csv"
+        path_out.parent.mkdir(exist_ok=True)
+
+        self.frame_table.to_csv(path_out, index=False)
+    
+    def load_index(self) -> bool:
+        path_index = self.dir_src / "index_frames.csv"
+        if not path_index.exists():
+            return False
+
+        self.frame_table = read_csv(path_index)
+        self.frames = [CaptureFrame.from_row(row) for _, row in self.frame_table.iterrows()]
+        return True
+
+    # def _capture_from_files(cls, dir_src: Path):
+
+    #     prefix = r"Retro_([a-zA-Z]+)_rot(\d+)"
+    #     prefix_aniso = r"Retro_([a-zA-Z]+)_theta(\d+)-phi(\d+)"
+
+    #     self._ingest_files(dir_src, {
+    #         # Retroreflection brightness
+    #         fr"{prefix}_\.exr": partial(self._handle_file_measure, is_iso=True),
+    #         fr"{prefix_aniso}_\.exr": partial(self._handle_file_measure, is_iso=False),
+    #         # Single exposure photo per stage pose
+    #         fr"{prefix}_rectify\.jpg": partial(self._handle_file_anchor, is_iso=True),
+    #         fr"{prefix_aniso}_rectify\.jpg": partial(self._handle_file_anchor, is_iso=False),
+    #         # All lights
+    #         fr"{prefix}_gradientA_\.exr": partial(self._handle_file_all_lights, is_iso=True),
+    #         fr"{prefix_aniso}_gradientA255\.jpg": partial(self._handle_file_all_lights, is_iso=False),
+    #         # Normals estimated using gradient patterns
+    #         fr"{prefix}_normal01\.exr": partial(self._handle_file_grad_normals, is_iso=True),
+    #         fr"{prefix_aniso}_normal01\.exr": partial(self._handle_file_grad_normals, is_iso=False),
+    #         r"Normal_Retro_([a-zA-Z]+)_theta(\d+)-phi(\d+)\.exr": partial(self._handle_file_grad_normals, is_iso=False),
+    #     })
 
 
 
-        prefix = r"Retro_([a-zA-Z]+)_rot(\d+)"
-        prefix_aniso = r"Retro_([a-zA-Z]+)_theta(\d+)-phi(\d+)"
+ 
 
-        self._ingest_files(dir_src, {
-            # Retroreflection brightness
-            fr"{prefix}_\.exr": partial(self._handle_file_measure, is_iso=True),
-            fr"{prefix_aniso}_\.exr": partial(self._handle_file_measure, is_iso=False),
-            # Single exposure photo per stage pose
-            fr"{prefix}_rectify\.jpg": partial(self._handle_file_anchor, is_iso=True),
-            fr"{prefix_aniso}_rectify\.jpg": partial(self._handle_file_anchor, is_iso=False),
-            # All lights
-            fr"{prefix}_gradientA_\.exr": partial(self._handle_file_all_lights, is_iso=True),
-            fr"{prefix_aniso}_gradientA255\.jpg": partial(self._handle_file_all_lights, is_iso=False),
-            # Normals estimated using gradient patterns
-            fr"{prefix}_normal01\.exr": partial(self._handle_file_grad_normals, is_iso=True),
-            fr"{prefix_aniso}_normal01\.exr": partial(self._handle_file_grad_normals, is_iso=False),
-            r"Normal_Retro_([a-zA-Z]+)_theta(\d+)-phi(\d+)\.exr": partial(self._handle_file_grad_normals, is_iso=False),
-        })
+    # @classmethod
+    # def _scan_files(cls, dir_src: Path, handlers: dict[str, callable]):
+    #     """
+    #     Args:
+    #         handlers: dict of regex pattern to handler function.
+    #             Each function takes (path: Path, match: re.Match, frames: list, stage_poses: dict)
+    #             The empty string key handlers[""] is called for unmatched files.
+                
+    #     """
+
+    #     frames = []
+    #     stage_poses : dict[tuple[int, int], CaptureStagePose] = {}
+
+    #     handle_unmatched = handlers[""]
+
+    #     for file in sorted(dir_src.iterdir()):
+    #         if file.is_file():
+    #             for pattern, handler in handlers.items():
+    #                 if m := re.match(pattern, file.name):
+    #                     handler(file, m, frames, stage_poses)
+    #                     continue
+
+    #             handle_unmatched(file, frames, stage_poses)
+
+    # @classmethod
+    # def from_files_unindexed(cls, dir_src: Union[str, Path], **kwargs) -> "VarisCapture":
+    #     dir_src = Path(dir_src)
+
+    #     # Scan filenames to get reflectance frames and stage poses
+    #     frame_objs, stage_poses = cls._scan_files(dir_src)
 
 
 
-    def _update_name(self, frame_name: str):
-        if self.name == "uninitialized":
-            self.name = frame_name
-        elif self.name != frame_name:
-            print(f"Frame name '{frame_name}' does not match previously loaded '{self.name}'")
 
-    def get_stage_pose(
-        self, wi_id: tuple[int, int], name: str = "", create: bool = False
-    ) -> CaptureStagePose | None:
-        sp = self.stage_poses.get(wi_id)
 
-        if sp is None and create:
-            theta_i, phi_i = wi_id
-            sp = CaptureStagePose(
-                theta_i_index=theta_i,
-                theta_i=self.olat_theta_i[theta_i],
-                phi_i_index=phi_i,
-                phi_i=self.olat_phi_i[phi_i],
-                name=name,
-            )
-            self.stage_poses[wi_id] = sp
 
-        self._update_name(name)
+    #     capture = cls(dir_src=dir_src, **kwargs)
+    #     capture._capture_from_files(dir_src)
+    #     return capture
 
-        return sp
+    def _solve_unindexed_frames(self):
+        """Apply the post-measurement adjustments to captures frames."""
+
+    
+    
+    # @cached_property
+    # def frame_table(self) -> DataFrame:
+    #     tab = DataFrame.from_records(
+    #         # index=("theta_id", "phi_id", "dmx_id", "light_id"),
+    #         data=[f.asdict() for f in self.frames],
+    #     )
+    #     tab.set_index(["theta_id", "phi_id", "dmx_id", "light_id"], drop=False, inplace=True)
+    #     return tab
+
+
+    
+
 
     def __init__(
         self,
@@ -451,7 +593,13 @@ class VarisCapture:
             )
      
 
-    def _derive_frame_coordinates(self, invalid: str = "error"):
+    def _update_table_from_frames(self):
+        self.frame_table = DataFrame.from_records(
+            data=[f.asdict() for f in self.frames],
+        )
+        self.frame_table.set_index(["theta_id", "phi_id", "dmx_id", "light_id"], drop=False, inplace=True)
+
+    def _derive_frame_coordinates(self):
         """
         Processes `self.frames` to determine the sample space transform, incident and outgoing directions.
 
@@ -461,52 +609,58 @@ class VarisCapture:
                 "remove" - remove the frame, use this mode to filter valid frames from naively generated synthetic frames
         """
 
-        valid_indices = []
+        # valid_indices = []
 
-        if invalid not in {"error", "remove", "ignore"}:
-            raise ValueError(
-                f"invalid must be 'error' / 'remove' / 'ignore', got {invalid}"
-            )
+        # # if invalid not in {"error", "remove", "ignore"}:
+        # #     raise ValueError(
+        # #         f"invalid must be 'error' / 'remove' / 'ignore', got {invalid}"
+        # #     )
 
-        for i, frame in enumerate(self.frames):
-            # Check if directions are above horizon
-            is_valid = frame.sample_wo[2] > -0.05 and frame.sample_wi[2] > -0.
-            # TODO Should I bump up this threshold?  I like the images that the -0.05 check deems invalid...
+        # # for i, frame in enumerate(self.frames):
+        # #     # Check if directions are above horizon
+        # #     is_valid = frame.sample_wo[2] > -0.05 and frame.sample_wi[2] > -0.
+        # #     # TODO Should I bump up this threshold?  I like the images that the -0.05 check deems invalid...
             
 
-            if is_valid:
-                valid_indices.append(i)
-            elif invalid == "error":
-                raise ValueError(
-                    f"Frame {i} has invalid directions {frame.sample_wo=} (for LED {frame.dmx_id=}, {frame.light_id=}) {frame.sample_wi=})"
-                )
-            elif invalid == "ignore":
-                valid_indices.append(i)
-                wiid = frame.wiid
-                print(
-                    f"Frame {wiid} has invalid directions {frame.sample_wo=}  (for LED {frame.dmx_id=}, {frame.light_id=}) {frame.sample_wi=})"
-                )
+        # #     if is_valid:
+        # #         valid_indices.append(i)
+        # #     elif invalid == "error":
+        # #         raise ValueError(
+        # #             f"Frame {i} has invalid directions {frame.sample_wo=} (for LED {frame.dmx_id=}, {frame.light_id=}) {frame.sample_wi=})"
+        # #         )
+        # #     elif invalid == "ignore":
+        # #         valid_indices.append(i)
+        # #         wiid = frame.wiid
+        # #         print(
+        # #             f"Frame {wiid} has invalid directions {frame.sample_wo=}  (for LED {frame.dmx_id=}, {frame.light_id=}) {frame.sample_wi=})"
+        # #         )
 
-        # Remove frames with directions under the horizon
-        self.frames = [self.frames[i] for i in valid_indices]
-        # Build efficient packed arrays of directions
-        self.frame_wo = np.stack(
-            [frame.sample_wo for frame in self.frames], axis=0, dtype=np.float32
-        )
-        self.frame_wi = np.stack(
-            [frame.sample_wi for frame in self.frames], axis=0, dtype=np.float32
-        )
-        self.frame_wi_index = np.array(
-            [frame.wiid for frame in self.frames], dtype=np.int32
-        )
-        self.frame_dmx_light_ids = np.array(
-            [[frame.dmx_id, frame.light_id] for frame in self.frames], dtype=np.int32
-        )
+        # # Remove frames with directions under the horizon
+        # # self.frames = [self.frames[i] for i in valid_indices]
 
-        # Replace the direction vectors with slices into the packed array
-        for i, frame in enumerate(self.frames):
-            frame.sample_wo = self.frame_wo[i]
-            frame.sample_wi = self.frame_wi[i]
+        # # Build efficient packed arrays of directions
+        # self.frame_wo = np.stack(
+        #     [frame.sample_wo for frame in self.frames], axis=0, dtype=np.float32
+        # )
+        # self.frame_wi = np.stack(
+        #     [frame.sample_wi for frame in self.frames], axis=0, dtype=np.float32
+        # )
+        # self.frame_wi_index = np.array(
+        #     [frame.wiid for frame in self.frames], dtype=np.int32
+        # )
+        # self.frame_dmx_light_ids = np.array(
+        #     [[frame.dmx_id, frame.light_id] for frame in self.frames], dtype=np.int32
+        # )
+
+        # # Replace the direction vectors with slices into the packed array
+        # for i, frame in enumerate(self.frames):
+        #     frame.sample_wo = self.frame_wo[i]
+        #     frame.sample_wi = self.frame_wi[i]
+
+        self._update_table_from_frames()
+        
+
+
 
     def cropped_image_view( self, crop_tl_yx=(0, 0), crop_br_yx=(None, None), mask=None) -> "VarisCaptureCroppedView":
         """
