@@ -7,24 +7,22 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 import cv2 as cv
 import h5py
 import numpy as np
 from imageio import imwrite
 from matplotlib import pyplot
-from sympy import capture
 from tqdm import tqdm
+from scipy.spatial.transform import Rotation
+
 
 from ..Space.capture import VarisCapture
 from ..Space.olat_subcrops import OLATRegionView
 from ..Utilities.ImageIO import RGL_tonemap, RGL_tonemap_uint8
 from ..Utilities.Pixels import marker_mask_from_image
 from ..Utilities.show_image import image_montage_same_shape, show
-
-
-
 
 
 
@@ -277,8 +275,54 @@ def light_find_slope(theta_cos, frame_brightness, per_light_indices):
 
 
 
+def rotate_stage_pose_by_board_normal_keeping_view_x_zero(board_normal: np.ndarray, stage_view_dir: np.ndarray) -> Rotation:
+    """
+    Find a rotation that adjusts view and light directions in sample space given a recovered board normal.
 
-def dataset_opt(capture: VarisCapture, n_iters = 3, stats_override: Optional[FrameBrightnessStatistics] = None, b_plot=True):
+    Args:
+        board_normal: [3] Normal of the board plane in sample coordinates
+        stage_view_dir: [3] View direction is sample coordinates
+
+    Returns:
+        A rotation that sends board_normal -> [0,0,1] 
+        but keeps the rotated stage_view_dir x at 0 to maintain the convention.
+    """
+
+    eps = 1e-12
+    board_normal = np.asarray(board_normal, dtype=np.float64)
+    stage_view_dir = np.asarray(stage_view_dir, dtype=np.float64)
+    stage_view_dir /= np.linalg.norm(stage_view_dir)
+
+    # Check that stage_view_dir x is close to 0
+    if abs(stage_view_dir[0]) > 1e-6:
+        raise ValueError("stage_view_dir x component must be close to 0")
+
+    # Build the rotation matrix columns
+    # unit R_z
+    R_z = board_normal / np.linalg.norm(board_normal)
+
+    # choose x axis orthogonal to both R_z and stage_view_dir
+    R_x = np.cross(R_z, stage_view_dir)
+    if (R_x_norm := np.linalg.norm(R_x)) > eps:
+        R_x /= R_x_norm
+    else:
+        # stage_view_dir parallel (or nearly) to board_normal: pick any stable perpendicular vector
+        perp = np.array([1.0, 0.0, 0.0]) if abs(R_z[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+        R_x = np.cross(perp, R_z)
+        R_x /= np.linalg.norm(R_x)
+
+    # The y axis is normal to both x and z
+    R_y = np.cross(R_z, R_x)
+
+    S = np.column_stack([R_x, R_y, R_z]) # source basis columns
+    R_adjust = Rotation.from_matrix(S.T) # maps source basis -> canonical basis
+
+    assert np.allclose(R_adjust.apply(board_normal), np.array([0.0, 0.0, 1.0]), atol=1e-8)
+    assert abs(R_adjust.apply(stage_view_dir)[0]) < 1e-6
+
+    return R_adjust
+
+def dataset_opt(capture: VarisCapture, n_iters = 3, stats_override: Optional[FrameBrightnessStatistics] = None, b_plot: Union[bool, str, Path] = True):
 
     # Lights
     _, light_id_unique, light_ref_count = np.unique(capture.frame_dmx_light_ids, axis=0, return_inverse=True, return_counts=True)
@@ -310,14 +354,24 @@ def dataset_opt(capture: VarisCapture, n_iters = 3, stats_override: Optional[Fra
     light_slope = np.ones(num_lights, dtype=np.float32)
     brightness = stats_white_mean
 
-    def plot():
+    def plot(step= 0):
         if b_plot:
-            plot_both(theta_cos, stats_rgb_mean / light_slope[light_id_unique][:, None], stats_white_std / light_slope[light_id_unique][:, None], per_light_indices)
-
+            fig = plot_both(theta_cos, stats_rgb_mean / light_slope[light_id_unique][:, None], stats_white_std / light_slope[light_id_unique][:, None], per_light_indices)
+            if isinstance(b_plot, (str, Path)):
+                path_out = Path(b_plot) / f"{capture.name}_brightness_correction_iter{step:02d}"
+                path_out.parent.mkdir(exist_ok=True, parents=True)
+                for fmt in ["png", "pdf"]:
+                    fig.savefig(path_out.with_suffix(f".{fmt}"))
 
     plot()
 
     for step in range(n_iters):
+        # plot_per_light(theta_cos, stats_white_mean, per_light_indices)
+        light_slope = light_find_slope(theta_cos, stats_white_mean, per_light_indices)
+        brightness = stats_white_mean / light_slope[light_id_unique]
+
+        plot(step*2+2)
+
         # Solve for initial board rotation normal, such that
         # wos dot n is linear to stack_mean
         n_optimized = np.linalg.lstsq(wos, brightness, rcond=None)[0]
@@ -325,17 +379,121 @@ def dataset_opt(capture: VarisCapture, n_iters = 3, stats_override: Optional[Fra
         print(f"Initial board rotation normal: {n_optimized}")
         theta_cos = np.dot(wos, n_optimized)
 
-        plot()
+        plot(step*2+1)
 
-        # plot_per_light(theta_cos, stats_white_mean, per_light_indices)
-        light_slope = light_find_slope(theta_cos, stats_white_mean, per_light_indices)
-        brightness = stats_white_mean / light_slope[light_id_unique]
-
-        plot()
 
 
     # TODO rotate the frames!
+
+
+    for fr in capture.frames:
+        ...
+    
+
     return n_optimized, light_slope, 1. / light_slope[light_id_unique]
+
+
+
+def correct_light_brightness_and_board_normal(capture: VarisCapture, n_iters = 3, visible_fraction_threshold:float=0.8, brightness_threshold:float= 0.05, b_plot: Union[bool, str, Path] = True):
+
+
+    # Pick valid
+    white_marker_visible_fraction = capture.frame_table["white_marker_visible_fraction"].to_numpy()
+    fr_idx_mask_valid = (white_marker_visible_fraction > visible_fraction_threshold) & (capture.white_marker_intensity_mean > brightness_threshold )
+    stats_rgb_mean = capture.white_marker_rgb_mean[fr_idx_mask_valid]
+    stats_white_std = capture.white_marker_intensity_std[fr_idx_mask_valid]
+    stats_white_mean = capture.white_marker_intensity_mean[fr_idx_mask_valid]
+    wos = capture.sample_wo[fr_idx_mask_valid]
+    print(f"Valid frames: {np.count_nonzero(fr_idx_mask_valid)} / {len(fr_idx_mask_valid)}")
+
+    # Lights
+    _, light_id_unique, light_ref_count = np.unique(capture.frame_dmx_light_ids, axis=0, return_inverse=True, return_counts=True)
+    num_lights = light_ref_count.shape[0]
+    # For each unique light, find all frame indices
+    light_id_unique = light_id_unique[fr_idx_mask_valid]
+    per_light_indices = [[] for _ in range(num_lights)]
+    for fr_idx, light_id in enumerate(light_id_unique):
+        per_light_indices[light_id].append(fr_idx)
+    per_light_indices = [np.array(indices) for indices in per_light_indices]
+
+    # Optimization variables
+    n_optimized = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+    light_slope = np.ones(num_lights, dtype=np.float32)
+
+    theta_cos = wos[:, 2]
+    brightness = stats_white_mean
+
+    def plot(step= 0):
+        if b_plot:
+            fig = plot_both(theta_cos, stats_rgb_mean / light_slope[light_id_unique][:, None], stats_white_std / light_slope[light_id_unique][:, None], per_light_indices)
+            if isinstance(b_plot, (str, Path)):
+                path_out = Path(b_plot) / f"{capture.name}_brightness_correction_iter{step:02d}"
+                path_out.parent.mkdir(exist_ok=True, parents=True)
+                for fmt in ["png", "pdf"]:
+                    fig.savefig(path_out.with_suffix(f".{fmt}"))
+
+    plot()
+
+    # for step in range(n_iters):
+    #     # plot_per_light(theta_cos, stats_white_mean, per_light_indices)
+    #     light_slope = light_find_slope(theta_cos, stats_white_mean, per_light_indices)
+    #     brightness = stats_white_mean / light_slope[light_id_unique]
+
+    #     plot(step*2+1)
+
+    #     # Solve for initial board rotation normal, such that
+    #     # wos dot n is linear to stack_mean
+    #     n_optimized = np.linalg.lstsq(wos, brightness, rcond=None)[0]
+    #     n_optimized /= np.linalg.norm(n_optimized)
+    #     print(f"Initial board rotation normal: {n_optimized}")
+    #     theta_cos = np.dot(wos, n_optimized)
+
+    #     plot(step*2+2)
+
+
+    def opt_normal():
+        # Solve for initial board rotation normal, such that
+        # wos dot n is linear to stack_mean
+        n_optimized = np.linalg.lstsq(wos, brightness, rcond=None)[0]
+        n_optimized /= np.linalg.norm(n_optimized)
+        print(f"Initial board rotation normal: {n_optimized}")
+        theta_cos = np.dot(wos, n_optimized)
+        return n_optimized, theta_cos
+
+    def opt_light_brightness():
+        # plot_per_light(theta_cos, stats_white_mean, per_light_indices)
+        light_slope = light_find_slope(theta_cos, stats_white_mean, per_light_indices)
+        brightness = stats_white_mean / light_slope[light_id_unique]
+        return light_slope, brightness
+
+    for step in range(n_iters):
+        n_optimized, theta_cos = opt_normal()
+        plot(step*2+1)
+
+        light_slope, brightness = opt_light_brightness()
+        plot(step*2+2)
+
+
+    brightness_correction_all_frames = np.ones(len(capture), dtype=np.float32)
+    brightness_correction_all_frames[fr_idx_mask_valid] = 1. / light_slope[light_id_unique]
+
+    # Rotation is specific to stage poses
+    rotation_by_stage_pose_index : dict[tuple[int, int], Rotation] = {}
+
+    for fr, is_valid, brightness_correction in zip(capture.frames, fr_idx_mask_valid, brightness_correction_all_frames):
+        fr.is_valid = is_valid
+        fr.brightness_correction = brightness_correction
+
+        R = rotation_by_stage_pose_index[fr.wiid] = (
+            rotation_by_stage_pose_index.get(fr.wiid) 
+            or rotate_stage_pose_by_board_normal_keeping_view_x_zero(n_optimized, fr.sample_wi)
+        )
+        fr.sample_wi = R.apply(fr.sample_wi)
+        fr.sample_wo = R.apply(fr.sample_wo)
+
+    print(f"{rotation_by_stage_pose_index=}")
+
+    capture._update_table_from_frames()
 
 
 

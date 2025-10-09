@@ -99,7 +99,6 @@ class OLATCapture(VarisCapture):
 
         # self._build_query_index()
 
-        self.named_region_views : dict[str, "OLATRegionView"]= {}
         self.load_named_regions(dir_src)
 
         print(f"OLAT: {len(self.frames)} frames in {dir_src}")
@@ -250,29 +249,7 @@ class OLATCapture(VarisCapture):
 
 
 
-    def load_named_regions(self, dir_src: Path, extract=False, write_small_files=False):
-        from .olat_subcrops import OLATRegionView
-        path_svg = dir_src / "000_subcrops_choice.svg"
-        if path_svg.is_file():
-            regions = OLATRegionView.regions_from_svg(self, path_svg, dir_storage=dir_src / "100_cache")                
-            self.named_region_views.update({r.region_name: r for r in regions})
-        
-        region_masks = {}
-        for region_mask_file in dir_src.iterdir():
-            if match := (re.match(r"000_submask_(.*)\.png", region_mask_file.name) or re.match(r"Masks_(.*)\.png", region_mask_file.name)):
-                region_masks[match.group(1)] = region_mask_file
-        for region_mask_file in (dir_src / "masks").glob("*.png"):
-            region_masks[region_mask_file.stem] = region_mask_file
-        
-        for region_name, region_mask_file in region_masks.items():
-            mask_image = readImage(region_mask_file)
-            mask = mask_image[:, :, 0] < 50
-            self.named_region_views[region_name] = OLATPixelMaskView(
-                region_name, mask, dir_src, self,
-            )
 
-        if self.named_region_views:
-            print(f"Loaded regions: {list(self.named_region_views.keys())}")
 
 
     def _build_stage_pose_index(self):

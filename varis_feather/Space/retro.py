@@ -57,41 +57,7 @@ class RetroreflectionCapture(VarisCapture):
 
 
     def _load_frames_from_dir_without_index(self, dir_src: Path):
-        """
-        Kind_Name_Pose_Image
-
-        * Kind 
-            * `Retro` for retroreflection
-            * `Full` for OLAT reflectance
-        * Name
-            * `Spectralon`
-            * `Feather{Species}`
-            * `ButterflySwallowtail`
-        * Pose
-            * `rot000` ... `rot127` for isotropic retroreflection
-            * `wi000` ... `wi007` for isotropic OLAT
-            * `thetaI000-phiI000` ... `thetaI015-phiI003` for anisotropic OLAT
-            * `theta000-phi000` ... `theta015-phi003` for anisotropic retroreflection
-        * Image
-            * `_.exr` for HDR reflectance
-            * `_rectify.jpg` for single exposure JPG photo with all lights on, for alignment
-            * `_gradientA_.exr` for photo with all lights on
-            * `_gradientX_.exr` for photo with gradient pattern (X, Y, Z)
-            * `_normal01.exr` for estimated normals using gradient patterns
-        """
-
-        RE_OLAT_FILE = r"Full_([a-zA-Z]+)_wi(\d+)_dmx(\d+)_light(\d+)_\.exr"
-        RE_OLAT_FILE_ANISO = r"Full_([a-zA-Z]+)_thetaI(\d+)-phiI(\d+)_dmx(\d+)_light(\d+)_\.exr"
-        # Photo with all lights on, for alignment, ie "Full_ButterflySwallowtailAniso_thetaI000-phiI000.jpg"
-        RE_ALL_LIGHTS = r"Full_([a-zA-Z]+)_wi(\d+)_gradientA_\.exr"
-        RE_ALL_LIGHTS_ANISO = r"Full_([a-zA-Z]+)_thetaI(\d+)-phiI(\d+)\.jpg"
-        # Single exposure photo per stage pose
-        RE_ANCHOR = r"Full_([a-zA-Z]+)_wi(\d+)_rectify\.jpg"
-        RE_ANCHOR_ANISO = r"Full_([a-zA-Z]+)_thetaI(\d+)-phiI(\d+)_rectify\.jpg"
-        # Normals estimated using gradient patterns
-        RE_NORMALS_FROM_GRAD = r"Full_([a-zA-Z]+)_wi(\d+)_normal01\.exr"
-        RE_NORMALS_FROM_GRAD_ANISO = r"Normal_Full_([a-zA-Z]+)_thetaI(\d+)-phiI(\d+)\.exr"
-
+        """"""
         prefix = r"Retro_([a-zA-Z]+)_rot(\d+)"
         prefix_aniso = r"Retro_([a-zA-Z]+)_theta(\d+)-phi(\d+)"
 

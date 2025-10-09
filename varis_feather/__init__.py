@@ -7,6 +7,7 @@ from .Space.olat import OLATCapture, ThetaDistribution
 from .Space.retro import RetroreflectionCapture
 
 
+
 def load_standard_capture(cap_name, mode: str = "rectified", retro_variant="128x1", olat_variant="iso", retro_kwargs: None | dict[str, Any] = None, olat_kwargs: None | dict[str, Any] = None) -> tuple[RetroreflectionCapture, OLATCapture]:
  
     if mode == "legacy":
@@ -39,4 +40,9 @@ def load_standard_capture(cap_name, mode: str = "rectified", retro_variant="128x
         **(olat_kwargs or {}),
     )
     print(olat.report())
+
+    if olat.named_region_views and not retro.named_region_views:
+        # We usually keep the named regions with the OLAT
+        retro.load_named_regions(olat.dir_src)
+
     return retro, olat

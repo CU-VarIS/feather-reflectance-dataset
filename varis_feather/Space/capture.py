@@ -249,6 +249,9 @@ class VarisCapture:
     name: str
     dir_src: Path
 
+    named_region_views: dict[str, "OLATRegionView"] = {}
+
+
     @property
     def num_theta_i(self) -> int:
         return len(self.olat_theta_i)
@@ -299,6 +302,10 @@ class VarisCapture:
     @property
     def white_marker_intensity_mean(self) -> np.ndarray:
         return self.frame_table["white_marker_intensity_mean"].to_numpy()
+
+    @property
+    def white_marker_intensity_std(self) -> np.ndarray:
+        return self.frame_table["white_marker_intensity_std"].to_numpy()
 
     def _set_angles(self, num_theta_i, num_phi_i, theta_distribution: ThetaDistribution):
         raise NotImplementedError("Provide implementation for self.olat_theta_i and self.olat_phi_i")
@@ -362,11 +369,15 @@ class VarisCapture:
     def _ingest_files(self, dir_src: Path, handlers: dict[str, callable]):
         for file in sorted(dir_src.iterdir()):
             if file.is_file():
+                handled = False
                 for pattern, handler in handlers.items():
                     if m := re.match(pattern, file.name):
                         handler(file, m)
-                        continue
-                self._handle_file_unmatched(file)
+                        handled = True
+                        break
+
+                if not handled:
+                    self._handle_file_unmatched(file)
 
 
     def save_index(self):
@@ -433,24 +444,88 @@ class VarisCapture:
 
     #             handle_unmatched(file, frames, stage_poses)
 
-    # @classmethod
-    # def from_files_unindexed(cls, dir_src: Union[str, Path], **kwargs) -> "VarisCapture":
-    #     dir_src = Path(dir_src)
+       
 
-    #     # Scan filenames to get reflectance frames and stage poses
-    #     frame_objs, stage_poses = cls._scan_files(dir_src)
+    @classmethod
+    def from_files_unindexed(cls, dir_src: Union[str, Path], **kwargs) -> "VarisCapture":
+        """
+        Kind_Name_Pose(_Light)_Image
+
+        * Kind 
+            * `Retro` for retroreflection
+            * `Full` for OLAT reflectance
+        * Name
+            * `Spectralon`
+            * `Feather{Species}`
+            * `ButterflySwallowtail`
+        * Pose
+            * `rot000` ... `rot127` for isotropic retroreflection
+            * `wi000` ... `wi007` for isotropic OLAT
+            * `thetaI000-phiI000` ... `thetaI015-phiI003` for anisotropic OLAT
+            * `theta000-phi000` ... `theta015-phi003` for anisotropic retroreflection
+        * Light - optional, only for OLAT reflectance
+            * dmx000_light000
+        * Image
+            * `_.exr` for HDR reflectance
+            * `_rectify.jpg` for single exposure JPG photo with all lights on, for alignment
+            * `_gradientA_.exr` for photo with all lights on
+            * `_gradientX_.exr` for photo with gradient pattern (X, Y, Z)
+            * `_normal01.exr` for estimated normals using gradient patterns
+        """
+        dir_src = Path(dir_src)
+
+        # Scan filenames to get reflectance frames and stage poses
+        frame_objs, stage_poses = cls._scan_files(dir_src)
+
+
+        from .olat import OLATCapture
+        from .retro import RetroreflectionCapture
 
 
 
+        def process_file(path: Path):
+            try:
+                kind, name, pose, channel = path.name.split("_", 3)
+            except ValueError:
+                return None
+            
+
+        capture = cls(dir_src=dir_src, **kwargs)
+        capture._capture_from_files(dir_src)
 
 
+        # RE_OLAT_FILE = r"Full_([a-zA-Z]+)_wi(\d+)_dmx(\d+)_light(\d+)_\.exr"
+        # RE_OLAT_FILE_ANISO = r"Full_([a-zA-Z]+)_thetaI(\d+)-phiI(\d+)_dmx(\d+)_light(\d+)_\.exr"
+        # # Photo with all lights on, for alignment, ie "Full_ButterflySwallowtailAniso_thetaI000-phiI000.jpg"
+        # RE_ALL_LIGHTS = r"Full_([a-zA-Z]+)_wi(\d+)_gradientA_\.exr"
+        # RE_ALL_LIGHTS_ANISO = r"Full_([a-zA-Z]+)_thetaI(\d+)-phiI(\d+)\.jpg"
+        # # Single exposure photo per stage pose
+        # RE_ANCHOR = r"Full_([a-zA-Z]+)_wi(\d+)_rectify\.jpg"
+        # RE_ANCHOR_ANISO = r"Full_([a-zA-Z]+)_thetaI(\d+)-phiI(\d+)_rectify\.jpg"
+        # # Normals estimated using gradient patterns
+        # RE_NORMALS_FROM_GRAD = r"Full_([a-zA-Z]+)_wi(\d+)_normal01\.exr"
+        # RE_NORMALS_FROM_GRAD_ANISO = r"Normal_Full_([a-zA-Z]+)_thetaI(\d+)-phiI(\d+)\.exr"
 
-    #     capture = cls(dir_src=dir_src, **kwargs)
-    #     capture._capture_from_files(dir_src)
-    #     return capture
+        # prefix = r"Retro_([a-zA-Z]+)_rot(\d+)"
+        # prefix_aniso = r"Retro_([a-zA-Z]+)_theta(\d+)-phi(\d+)"
 
-    def _solve_unindexed_frames(self):
-        """Apply the post-measurement adjustments to captures frames."""
+        # self._ingest_files(dir_src, {
+        #     # Retroreflection brightness
+        #     fr"{prefix}_\.exr": partial(self._handle_file_measure, is_iso=True),
+        #     fr"{prefix_aniso}_\.exr": partial(self._handle_file_measure, is_iso=False),
+        #     # Single exposure photo per stage pose
+        #     fr"{prefix}_rectify\.jpg": partial(self._handle_file_anchor, is_iso=True),
+        #     fr"{prefix_aniso}_rectify\.jpg": partial(self._handle_file_anchor, is_iso=False),
+        #     # All lights
+        #     fr"{prefix}_gradientA_\.exr": partial(self._handle_file_all_lights, is_iso=True),
+        #     fr"{prefix_aniso}_gradientA255\.jpg": partial(self._handle_file_all_lights, is_iso=False),
+        #     # Normals estimated using gradient patterns
+        #     fr"{prefix}_normal01\.exr": partial(self._handle_file_grad_normals, is_iso=True),
+        #     fr"{prefix_aniso}_normal01\.exr": partial(self._handle_file_grad_normals, is_iso=False),
+        #     r"Normal_Retro_([a-zA-Z]+)_theta(\d+)-phi(\d+)\.exr": partial(self._handle_file_grad_normals, is_iso=False),
+        # })
+
+        return capture
 
     
     
@@ -485,6 +560,7 @@ class VarisCapture:
         self.img_full_size_mm = img_full_size_mm
         self.pix_per_mm = pix_per_mm
         self.mm_per_tile = mm_per_tile
+        self.named_region_views = {}
 
         self._unmatched_files = {}
 
@@ -528,6 +604,30 @@ class VarisCapture:
     #     roi_tl, roi_wh = self.crop_mm_to_pix(roi_tl_mm, roi_wh_mm)
     #     # return img[roi_tl[1]:roi_tl[1]+roi_wh[1], roi_tl[0]:roi_tl[0]+roi_wh[0]]
     #     return slice(roi_tl[1], roi_tl[1]+roi_wh[1]), slice(roi_tl[0], roi_tl[0]+roi_wh[0])
+
+    def load_named_regions(self, dir_src: Path, extract=False, write_small_files=False):
+        from .olat_subcrops import OLATRegionView, OLATPixelMaskView
+        path_svg = dir_src / "000_subcrops_choice.svg"
+        if path_svg.is_file():
+            regions = OLATRegionView.regions_from_svg(self, path_svg, dir_storage=dir_src / "100_cache")                
+            self.named_region_views.update({r.region_name: r for r in regions})
+        
+        region_masks = {}
+        for region_mask_file in dir_src.iterdir():
+            if match := (re.match(r"000_submask_(.*)\.png", region_mask_file.name) or re.match(r"Masks_(.*)\.png", region_mask_file.name)):
+                region_masks[match.group(1)] = region_mask_file
+        for region_mask_file in (dir_src / "masks").glob("*.png"):
+            region_masks[region_mask_file.stem] = region_mask_file
+        
+        for region_name, region_mask_file in region_masks.items():
+            mask_image = readImage(region_mask_file)
+            mask = mask_image[:, :, 0] < 50
+            self.named_region_views[region_name] = OLATPixelMaskView(
+                region_name, mask, dir_src, self,
+            )
+
+        if self.named_region_views:
+            print(f"Loaded regions: {list(self.named_region_views.keys())}")
 
     def read_measurement_image(self, frame: Union[CaptureFrame, int], cache=False) -> np.ndarray:
         frame = frame if isinstance(frame, CaptureFrame) else self.frames[int(frame)]
@@ -949,16 +1049,18 @@ class VarisCapture:
         seaborn.set_theme()
         fig, ax = pyplot.subplots(1, 1, figsize=(20, 10))
 
+        view = self.named_region_views[view] if isinstance(view, str) else view
+
         if pose == "all":
             sp_indices = range(len(self.frames))
             wi = None
         elif isinstance(pose, tuple):
             sp_indices = self.stage_poses[pose].frame_indices
-            wi = self.frame_wi[sp_indices[0]]
+            wi = self.sample_wi[sp_indices[0]]
         else:
             raise ValueError(f"Invalid pose: {pose}")
 
-        wos = self.frame_wo[sp_indices]
+        wos = self.sample_wo[sp_indices]
 
         if allow_symmetrization and self.is_symetric_along_X:
             sp_indices = np.concatenate([sp_indices, sp_indices], axis=0)

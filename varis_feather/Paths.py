@@ -4,3 +4,19 @@ DIR_PROJECT = Path(__file__).absolute().parents[1]
 
 DIR_DATASET = DIR_PROJECT / "dataset"
 
+SCENES = [
+    "Spectralon",
+    "FeatherHyacinthMacaw",
+    "ButterflySwallowtail",
+    "FeatherBlackChinnedHummingbird",
+    "FeatherBlackVulture",
+    "FeatherBlueJay",
+    "FeatherGreatBlueHeron",
+    "FeatherGreatHornedOwl",
+    "FeatherNorthernFlicker",
+    "FeatherNorthernFlickerVentral",
+    "FeatherOstrich",
+    "FeatherRedCrownedAmazon",
+    "FeatherRedTailedHawk",
+    "FeatherRockDove",
+]
