@@ -1,3 +1,4 @@
+import os
 import re
 from dataclasses import dataclass
 from functools import cached_property, lru_cache
@@ -367,17 +368,17 @@ class VarisCapture:
         self._unmatched_files.setdefault(re.sub(r"\d", "#", path.name), []).append(path)
 
     def _ingest_files(self, dir_src: Path, handlers: dict[str, callable]):
-        for file in sorted(dir_src.iterdir()):
-            if file.is_file():
+        for entry in os.scandir(dir_src):
+            if entry.is_file():
                 handled = False
                 for pattern, handler in handlers.items():
-                    if m := re.match(pattern, file.name):
-                        handler(file, m)
+                    if m := re.match(pattern, entry.name):
+                        handler(Path(entry.path), m)
                         handled = True
                         break
 
                 if not handled:
-                    self._handle_file_unmatched(file)
+                    self._handle_file_unmatched(Path(entry.path))
 
 
     def save_index(self):
@@ -637,9 +638,11 @@ class VarisCapture:
 
         img = readImage(frame.image_path)
 
+        if frame.brightness_correction != 1.0:
+            img *= frame.brightness_correction
+
         if cache:
             frame.image_cache = img
-
 
         return img
 
@@ -1094,7 +1097,7 @@ class VarisCapture:
         if correction_factors is not None:
             color_stack *= correction_factors[:, None, None, None]
 
-        print(color_stack.shape)
+        # print(color_stack.shape)
         if tonemap:
             color_stack = RGL_tonemap_uint8(color_stack)
         else:

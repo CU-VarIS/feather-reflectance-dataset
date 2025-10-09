@@ -1,5 +1,6 @@
 
 from dataclasses import dataclass
+from multiprocessing.dummy import Pool as ThreadPool
 from pathlib import Path
 from xml.dom import minidom
 
@@ -37,7 +38,7 @@ class OLATRegionView:
         self.crop_wh = crop_wh
         self.crop_slice = (slice(crop_tl_xy[1], crop_tl_xy[1] + crop_wh[1]), slice(crop_tl_xy[0], crop_tl_xy[0] + crop_wh[0]))
 
-        self.dir_storage = dir_storage or capture.dir_src / "100_cache"
+        self.dir_storage = dir_storage or capture.dir_src / "cache"
 
 
         self.capture = capture
@@ -185,14 +186,14 @@ class OLATRegionView:
         return regions
     
     @classmethod
-    def extract_region_cache_olat(cls, capture: VarisCapture, write_small_files=False):
+    def extract_region_cache_olat(cls, capture: VarisCapture, write_small_files=False, num_workers=8):
         # TODO reread if original cache not present
 
         regions = list(capture.named_region_views.values())
         for r in regions:
             r._cache_allow_missing = True
 
-        for frame in tqdm(capture.frames, desc="Reading OLAT frames"):
+        def process_frame(frame: CaptureFrame):
             wiid = frame.wiid
             sp = capture.stage_poses[wiid]
             img = sp._manual_homography_apply(capture.read_measurement_image(frame))
@@ -203,6 +204,10 @@ class OLATRegionView:
                     dir_small = region.dir_storage / "processing" / region.region_name
                     dir_small.mkdir(parents=True, exist_ok=True)
                     writeImage(crop, dir_small / frame.image_path.name)
+
+        with ThreadPool(num_workers) as pool:
+            for _ in tqdm(pool.imap(process_frame, capture.frames), total=len(capture.frames), desc="Reading OLAT frames"):
+                pass
 
         for region in regions:
             region._cache_allow_missing = False

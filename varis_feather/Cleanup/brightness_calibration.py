@@ -267,9 +267,15 @@ def light_find_slope(theta_cos, frame_brightness, per_light_indices):
        
         a_no_intercept, _, _, _ = np.linalg.lstsq(theta_cos_subset[:, None], light_brightness, rcond=None)
         a_no_intercept = a_no_intercept[0]
+        
+        # Can't be negative!
+        if a_no_intercept <= 0:
+            a_no_intercept = 1.0
+        
         per_light_slope[light_idx] = a_no_intercept
 
-        order = np.argsort(theta_cos_subset)
+
+
 
     return per_light_slope
 
@@ -394,7 +400,7 @@ def dataset_opt(capture: VarisCapture, n_iters = 3, stats_override: Optional[Fra
 
 
 
-def correct_light_brightness_and_board_normal(capture: VarisCapture, n_iters = 3, visible_fraction_threshold:float=0.8, brightness_threshold:float= 0.05, b_plot: Union[bool, str, Path] = True):
+def correct_light_brightness_and_board_normal(capture: VarisCapture, n_iters = 3, visible_fraction_threshold:float=0.8, brightness_threshold:float= 0.05, plot: Union[bool, str, Path] = True):
 
 
     # Pick valid
@@ -423,16 +429,15 @@ def correct_light_brightness_and_board_normal(capture: VarisCapture, n_iters = 3
     theta_cos = wos[:, 2]
     brightness = stats_white_mean
 
-    def plot(step= 0):
-        if b_plot:
+    def plot_step(step= 0):
+        if plot:
             fig = plot_both(theta_cos, stats_rgb_mean / light_slope[light_id_unique][:, None], stats_white_std / light_slope[light_id_unique][:, None], per_light_indices)
-            if isinstance(b_plot, (str, Path)):
-                path_out = Path(b_plot) / f"{capture.name}_brightness_correction_iter{step:02d}"
+            if isinstance(plot, (str, Path)):
+                path_out = Path(plot) / f"{capture.name}_brightness_correction_iter{step:02d}"
                 path_out.parent.mkdir(exist_ok=True, parents=True)
                 for fmt in ["png", "pdf"]:
                     fig.savefig(path_out.with_suffix(f".{fmt}"))
 
-    plot()
 
     # for step in range(n_iters):
     #     # plot_per_light(theta_cos, stats_white_mean, per_light_indices)
@@ -466,12 +471,15 @@ def correct_light_brightness_and_board_normal(capture: VarisCapture, n_iters = 3
         brightness = stats_white_mean / light_slope[light_id_unique]
         return light_slope, brightness
 
+
+    plot_step()
+
     for step in range(n_iters):
         n_optimized, theta_cos = opt_normal()
-        plot(step*2+1)
+        plot_step(step*2+1)
 
         light_slope, brightness = opt_light_brightness()
-        plot(step*2+2)
+        plot_step(step*2+2)
 
 
     brightness_correction_all_frames = np.ones(len(capture), dtype=np.float32)
@@ -481,7 +489,6 @@ def correct_light_brightness_and_board_normal(capture: VarisCapture, n_iters = 3
     rotation_by_stage_pose_index : dict[tuple[int, int], Rotation] = {}
 
     for fr, is_valid, brightness_correction in zip(capture.frames, fr_idx_mask_valid, brightness_correction_all_frames):
-        fr.is_valid = is_valid
         fr.brightness_correction = brightness_correction
 
         R = rotation_by_stage_pose_index[fr.wiid] = (
@@ -490,6 +497,9 @@ def correct_light_brightness_and_board_normal(capture: VarisCapture, n_iters = 3
         )
         fr.sample_wi = R.apply(fr.sample_wi)
         fr.sample_wo = R.apply(fr.sample_wo)
+
+        fr.is_valid = is_valid and fr.sample_wo[2] > 0.01  # also remove cases where light ends up being below horizon
+
 
     print(f"{rotation_by_stage_pose_index=}")
 

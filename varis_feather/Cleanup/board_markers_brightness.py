@@ -34,8 +34,8 @@ def _capture_cleanup_shadows_per_frame(capture: "VarisCapture", frame: "CaptureF
     frame.white_marker_visible_fraction = white_marker_visible_fraction
     frame.is_valid = white_marker_visible_fraction > 0.8
 
-def capture_calculate_marker_brightness(capture: "VarisCapture"):
-    with ThreadPoolExecutor() as pool:
+def capture_calculate_marker_brightness(capture: "VarisCapture", num_workers: int = 8):
+    with ThreadPoolExecutor(max_workers=num_workers) as pool:
         futures = []
 
         for wiid, sp in capture.stage_poses.items():
