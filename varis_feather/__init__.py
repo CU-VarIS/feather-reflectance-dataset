@@ -18,17 +18,6 @@ def load_standard_capture(cap_name, mode: str = "rectified", retro_variant="128x
         dir_retro = DIR_DATASET / "captures" / cap_name / f"retro_{retro_variant}_{mode}"
         dir_olat = DIR_DATASET / "captures" / cap_name / f"olat_{olat_variant}_{mode}"
 
-
-    retro = RetroreflectionCapture(
-        dir_src = dir_retro,
-        num_theta_i=128,
-        num_phi_i=1,
-        # theta_distribution=ThetaDistribution(mode=ThetaDistribution.MODE_U_TO_THETA, offset_rad=np.deg2rad(10.43)),
-        frame_below_horizon="ignore",
-        **(retro_kwargs or {}),
-    )
-    print(retro.report())
-
     olat = OLATCapture(
         dir_src = dir_olat,
         num_theta_i=8,
@@ -41,8 +30,24 @@ def load_standard_capture(cap_name, mode: str = "rectified", retro_variant="128x
     )
     print(olat.report())
 
-    if olat.named_region_views and not retro.named_region_views:
-        # We usually keep the named regions with the OLAT
-        retro.load_named_regions(olat.dir_src)
+
+    try:
+        retro = RetroreflectionCapture(
+            dir_src = dir_retro,
+            num_theta_i=128,
+            num_phi_i=1,
+            # theta_distribution=ThetaDistribution(mode=ThetaDistribution.MODE_U_TO_THETA, offset_rad=np.deg2rad(10.43)),
+            frame_below_horizon="ignore",
+            **(retro_kwargs or {}),
+        )
+        print(retro.report())
+
+
+        if olat.named_region_views and not retro.named_region_views:
+            # We usually keep the named regions with the OLAT
+            retro.load_named_regions(olat.dir_src)
+    except Exception as e:
+        print(f"Could not load retro capture from {dir_retro}: {e}")
+        retro = None
 
     return retro, olat

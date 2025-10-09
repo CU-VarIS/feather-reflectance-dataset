@@ -610,7 +610,7 @@ class VarisCapture:
         from .olat_subcrops import OLATRegionView, OLATPixelMaskView
         path_svg = dir_src / "000_subcrops_choice.svg"
         if path_svg.is_file():
-            regions = OLATRegionView.regions_from_svg(self, path_svg, dir_storage=dir_src / "100_cache")                
+            regions = OLATRegionView.regions_from_svg(self, path_svg, dir_storage=dir_src / "cache")                
             self.named_region_views.update({r.region_name: r for r in regions})
         
         region_masks = {}
