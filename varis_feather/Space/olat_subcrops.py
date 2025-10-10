@@ -1,5 +1,6 @@
 
 from dataclasses import dataclass
+from functools import partial
 from multiprocessing.dummy import Pool as ThreadPool
 from pathlib import Path
 from xml.dom import minidom
@@ -8,7 +9,7 @@ import numpy as np
 from tqdm import tqdm
 
 from ..Utilities.ImageIO import readImage, writeImage
-from .capture import CaptureFrame, VarisCapture
+from .capture import CaptureFrame, FrameVisitor, FunctionFrameVisitor, VarisCapture
 from .retro import RetroreflectionCapture
 
 
@@ -157,8 +158,6 @@ class OLATRegionView:
 
         return retro_stack
 
-
-
     @classmethod
     def regions_from_svg(cls, capture: VarisCapture, path_svg: Path, dir_storage = None) -> list["RegionView"]:
         dir_storage = dir_storage or path_svg.parent
@@ -184,34 +183,43 @@ class OLATRegionView:
 
 
         return regions
-    
+
+    class _Visitor(FrameVisitor):
+        def __init__(self, region: "OLATRegionView", write_small_files: bool = False):
+            self.region = region
+            self.write_small_files = write_small_files
+
+        def start(self, capture: VarisCapture):
+            del capture
+            self.region._cache_allow_missing = True
+
+        def visit_frame(self, frame: CaptureFrame, img: np.ndarray):
+            crop = self.region.add_sample(frame, img)
+
+            if self.write_small_files:
+                dir_small = self.region.dir_storage / "processing" / self.region.region_name
+                dir_small.mkdir(parents=True, exist_ok=True)
+                writeImage(crop, dir_small / frame.image_path.name)
+
+        def finalize(self):
+            self.region._cache_allow_missing = False
+            self.region.save()
+
+
+    def visitor_extract_region(self, write_small_files=False) -> FrameVisitor:
+        return OLATRegionView._Visitor(self, write_small_files=write_small_files)
+
     @classmethod
     def extract_region_cache_olat(cls, capture: VarisCapture, write_small_files=False, num_workers=8):
         # TODO reread if original cache not present
+        capture.visit(
+            visitors=[
+                region.visitor_extract_region(write_small_files=write_small_files) 
+                for region in capture.named_region_views.values()
+            ],
+            num_threads=num_workers,
+        )
 
-        regions = list(capture.named_region_views.values())
-        for r in regions:
-            r._cache_allow_missing = True
-
-        def process_frame(frame: CaptureFrame):
-            wiid = frame.wiid
-            sp = capture.stage_poses[wiid]
-            img = sp._manual_homography_apply(capture.read_measurement_image(frame))
-            for region in regions:
-                crop = region.add_sample(frame, img)
-
-                if write_small_files:
-                    dir_small = region.dir_storage / "processing" / region.region_name
-                    dir_small.mkdir(parents=True, exist_ok=True)
-                    writeImage(crop, dir_small / frame.image_path.name)
-
-        with ThreadPool(num_workers) as pool:
-            for _ in tqdm(pool.imap(process_frame, capture.frames), total=len(capture.frames), desc="Reading OLAT frames"):
-                pass
-
-        for region in regions:
-            region._cache_allow_missing = False
-            region.save()
 
     # @classmethod
     # def extract_region_cache_retro(cls, capture: VarisCapture, write_small_files=False):
@@ -231,6 +239,8 @@ class OLATRegionView:
 
     #     for region in regions:
     #         region.save()
+
+
 
 
 

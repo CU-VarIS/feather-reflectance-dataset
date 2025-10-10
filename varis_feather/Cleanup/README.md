@@ -15,3 +15,5 @@ Presentation
 * Frame numbers
 * Region drawing
 * Brigthness plot
+
+ s3.us-east-005.backblazeb2.com/cu-varis-feather-v1-dev/FeatherBlackVulture/olat_iso_rectified/000_subcrops_choice.svg

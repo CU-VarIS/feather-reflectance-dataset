@@ -2,22 +2,26 @@ import os
 import re
 from dataclasses import dataclass
 from functools import cached_property, lru_cache
+# from multiprocessing.pool import ThreadPool
+from multiprocessing.dummy import Pool as ThreadPool
 from pathlib import Path
-from typing import Any, Literal, Optional, Union
+from typing import Any, Callable, Collection, Literal, Optional, Union
+from abc import ABC, abstractmethod
 
 import cv2 as cv
 import einops
 import numpy as np
-from pandas import DataFrame, read_csv
 import seaborn
 from matplotlib import pyplot
 from matplotlib.offsetbox import AnnotationBbox, OffsetImage
+from pandas import DataFrame, read_csv
 from scipy.spatial import KDTree
 from scipy.spatial.transform import Rotation
 from tqdm import tqdm
 
-from ..Utilities.ImageIO import RGL_tonemap_uint8, readImage, writeImage
 from ..Cleanup.board_markers_brightness import capture_calculate_marker_brightness
+from ..Utilities.ImageIO import RGL_tonemap_uint8, readImage, writeImage
+
 
 class ThetaDistribution:
     MODE_ARC_COS = "arc_cos"
@@ -230,6 +234,35 @@ class CaptureStagePose:
         val_normals_smooth = (img_normals_smooth * 2 - 1)
         val_normals_smooth /= np.linalg.norm(val_normals_smooth, axis=2, keepdims=True)
         return val_normals_smooth
+
+
+class FrameVisitor(ABC):
+    @abstractmethod
+    def start(self, capture: "VarisCapture"):
+        pass
+
+    @abstractmethod
+    def visit_frame(self, frame: CaptureFrame, img: np.ndarray):
+        pass
+
+    @abstractmethod
+    def finalize(self):
+        pass
+
+class FunctionFrameVisitor(FrameVisitor):
+    def __init__(self, visit: Callable[[CaptureFrame, np.ndarray], None], start: Callable[["VarisCapture"], None] = lambda: None, finalize: Callable[[], None] = lambda: None):
+        self._start = start
+        self._visit = visit
+        self._finalize = finalize
+
+    def start(self, capture: "VarisCapture"):
+        self._start(capture)
+
+    def visit_frame(self, frame: CaptureFrame, img: np.ndarray):
+        self._visit(frame, img)
+
+    def finalize(self):
+        self._finalize()
 
 
 class VarisCapture:
@@ -607,7 +640,7 @@ class VarisCapture:
     #     return slice(roi_tl[1], roi_tl[1]+roi_wh[1]), slice(roi_tl[0], roi_tl[0]+roi_wh[0])
 
     def load_named_regions(self, dir_src: Path, extract=False, write_small_files=False):
-        from .olat_subcrops import OLATRegionView, OLATPixelMaskView
+        from .olat_subcrops import OLATPixelMaskView, OLATRegionView
         path_svg = dir_src / "000_subcrops_choice.svg"
         if path_svg.is_file():
             regions = OLATRegionView.regions_from_svg(self, path_svg, dir_storage=dir_src / "cache")                
@@ -645,6 +678,30 @@ class VarisCapture:
             frame.image_cache = img
 
         return img
+
+    def visit(self, visitors: Collection[FrameVisitor], num_threads:int=8):
+        print("call")
+        def process_frame(frame: CaptureFrame):
+            sp = self.stage_poses[frame.wiid]
+            img = sp._manual_homography_apply(self.read_measurement_image(frame))
+            for visitor in visitors:
+                visitor.visit_frame(frame, img)
+
+        with ThreadPool(num_threads) as pool:
+            print("start")
+            # pool.map(lambda v: v.start(self), visitors)
+            for v in visitors:
+                v.start(self)
+
+            print("process")
+
+            for _ in tqdm(pool.imap(process_frame, self.frames), total=len(self.frames), desc="Visiting frames"):
+                pass
+
+            print("finalize")
+            # pool.map(lambda v: v.finalize(), visitors)
+            for v in visitors:
+                v.finalize()
 
 
 

@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from functools import cached_property
+from functools import cache, cached_property
 from pathlib import Path
 
 import cv2 as cv
@@ -7,7 +7,7 @@ import imageio
 import numpy as np
 import pandas
 from matplotlib import pyplot
-from scipy.spatial import KDTree
+from scipy.spatial import KDTree, SphericalVoronoi
 
 from .dome_coordinates import DomeCoordinates
 
@@ -47,7 +47,10 @@ class DomeLightIndex:
     light_info_table: pandas.DataFrame
     _idx_by_dmx_and_lightID: dict[int, dict[int, int]]
 
-    default_instance: "DomeLightIndex"
+    @classmethod
+    @cache
+    def default_instance(cls) -> "DomeLightIndex":
+        return cls()
 
     def __init__(
         self,
@@ -89,6 +92,16 @@ class DomeLightIndex:
     @cached_property
     def env_map_image(self):
         return imageio.imread(self.env_map_image_path)
+
+    @cached_property
+    def area_density_correction(self) -> np.ndarray:
+        # Calculate the spherical Voronoi diagram:
+        sv = SphericalVoronoi(self.lights_envMapYUp, radius=1, center=np.array([0, 0, 0]))
+        # Calculate area of each Voronoi region
+        areas = sv.calculate_areas()
+        # Correction is inverse density, averaged around 1
+        return np.mean(areas) / areas
+
 
     def get_index(self, dmx_id: int, light_id: int) -> int:
         return self._idx_by_dmx_and_lightID[dmx_id][light_id]
@@ -284,4 +297,55 @@ class DomeLightIndex:
         pyplot.close(fig)
 
 
-DomeLightIndex.default_instance = DomeLightIndex()
+    def voronoi_area_correction_demo(self):
+        from matplotlib import pyplot
+        from scipy.spatial import geometric_slerp
+        from mpl_toolkits.mplot3d import proj3d
+
+        points = self.lights_envMapYUp
+
+        # Calculate the spherical Voronoi diagram:
+        sv = SphericalVoronoi(points, radius=1, center=np.array([0, 0, 0]))
+
+        # Plot
+        # sort vertices (optional, helpful for plotting)
+        sv.sort_vertices_of_regions()
+
+        t_vals = np.linspace(0, 1, 2000)
+
+        fig = pyplot.figure()
+        ax = fig.add_subplot(111, projection='3d')
+
+        # plot the unit sphere for reference (optional)
+        u = np.linspace(0, 2 * np.pi, 100)
+        v = np.linspace(0, np.pi, 100)
+        x = np.outer(np.cos(u), np.sin(v))
+        y = np.outer(np.sin(u), np.sin(v))
+        z = np.outer(np.ones(np.size(u)), np.cos(v))
+        ax.plot_surface(x, y, z, color='y', alpha=0.1)
+
+        # plot generator points
+        ax.scatter(points[:, 0], points[:, 1], points[:, 2], c='b')
+        # plot Voronoi vertices
+        ax.scatter(sv.vertices[:, 0], sv.vertices[:, 1], sv.vertices[:, 2], c='g')
+
+        # indicate Voronoi regions (as Euclidean polygons)
+        for region in sv.regions:
+            n = len(region)
+            for i in range(n):
+                start = sv.vertices[region][i]
+                end = sv.vertices[region][(i + 1) % n]
+                result = geometric_slerp(start, end, t_vals)
+                ax.plot(result[..., 0], result[..., 1], result[..., 2], c='k')
+
+        ax.azim = 10
+        ax.elev = 40
+
+        _ = ax.set_xticks([])
+        _ = ax.set_yticks([])
+        _ = ax.set_zticks([])
+        fig.set_size_inches(4, 4)
+        fig.tight_layout()
+        pyplot.show()
+
+

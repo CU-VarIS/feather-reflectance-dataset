@@ -174,7 +174,7 @@ class OLATCapture(VarisCapture):
         # dir_rectified = workdir / "rectified"
         name = dir_src.name
 
-        di = DomeLightIndex.default_instance
+        di = DomeLightIndex.default_instance()
 
         self.frames = [
             CaptureFrame(
@@ -214,7 +214,7 @@ class OLATCapture(VarisCapture):
         self.olat_phi_i = np.linspace(-np.pi, np.pi, num_phi_i, endpoint=False)
         
     def _derive_frame_coordinates(self):
-        di = DomeLightIndex.default_instance
+        di = DomeLightIndex.default_instance()
 
         for frame in self.frames:
             # Transform from stage rotation
@@ -267,7 +267,7 @@ class OLATCapture(VarisCapture):
         frame_indices_by_wiid = self.frame_table.reset_index(drop=True).groupby(["theta_id", "phi_id"]).groups
 
         for wiid, frame_indices in frame_indices_by_wiid.items():
-            sp = self.stage_poses[wiid]
+            sp = self._get_stage_pose(wiid, create=True)
             sp.frame_indices = np.array(frame_indices)
 
     # def _drop_outliers(self):
