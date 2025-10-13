@@ -60,7 +60,8 @@ class RetroreflectionCapture(VarisCapture):
         """"""
         prefix = r"Retro_([a-zA-Z]+)_rot(\d+)"
         prefix_aniso = r"Retro_([a-zA-Z]+)_theta(\d+)-phi(\d+)"
-
+        
+        RE_GRADIENT = r"Retro_([a-zA-Z]+)_rot(\d+)_gradient([AXYZ])_\.exr"
 
         self._ingest_files(dir_src, {
             # Retroreflection brightness
@@ -76,6 +77,7 @@ class RetroreflectionCapture(VarisCapture):
             fr"{prefix}_normal01\.exr": partial(self._handle_file_grad_normals, is_iso=True),
             fr"{prefix_aniso}_normal01\.exr": partial(self._handle_file_grad_normals, is_iso=False),
             r"Normal_Retro_([a-zA-Z]+)_theta(\d+)-phi(\d+)\.exr": partial(self._handle_file_grad_normals, is_iso=False),
+            RE_GRADIENT: partial(self._handle_file_gradient, is_iso=True),
         })
 
 

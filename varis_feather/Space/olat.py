@@ -153,6 +153,8 @@ class OLATCapture(VarisCapture):
         RE_NORMALS_FROM_GRAD = r"Full_([a-zA-Z]+)_wi(\d+)_normal01\.exr"
         RE_NORMALS_FROM_GRAD_ANISO = r"Normal_Full_([a-zA-Z]+)_thetaI(\d+)-phiI(\d+)\.exr"
 
+        RE_GRADIENT = r"Full_([a-zA-Z]+)_wi(\d+)_gradient([AXYZ])_\.exr"
+
         self._ingest_files(Path(dir_src), {
             RE_OLAT_FILE: partial(self._handle_file_olat, is_iso=True),
             RE_OLAT_FILE_ANISO: partial(self._handle_file_olat, is_iso=False),
@@ -162,6 +164,7 @@ class OLATCapture(VarisCapture):
             RE_ALL_LIGHTS_ANISO: partial(self._handle_file_all_lights, is_iso=False),
             RE_NORMALS_FROM_GRAD: partial(self._handle_file_grad_normals, is_iso=True),
             RE_NORMALS_FROM_GRAD_ANISO: partial(self._handle_file_grad_normals, is_iso=False),
+            RE_GRADIENT: partial(self._handle_file_gradient, is_iso=True),
         })
 
     def _load_frames_synthetic(self, dir_src: Path):

@@ -240,6 +240,27 @@ class OLATRegionView:
     #     for region in regions:
     #         region.save()
 
+    def file_index(self) -> dict[str, Path]:
+        """Return all files in the region view."""
+        file_by_local_path = {}
+
+        # Cache files
+        for wiid in self.capture.stage_poses:
+            cache_path = self._cache_file_path(wiid)
+            if cache_path.is_file():
+                cache_path_relative = cache_path.relative_to(self.capture.dir_src)
+                file_by_local_path[str(cache_path_relative)] = cache_path
+                print("Added cache file:", cache_path_relative)
+            else:
+                print("Cache file missing:", cache_path)
+
+        # Materials
+        mat_path = self.capture.dir_src / "006_materials_manual" / f"{self.region_name}.bsdf"
+        if mat_path.is_file():
+            file_by_local_path[str(mat_path.relative_to(self.capture.dir_src))] = mat_path
+
+        return file_by_local_path
+
 
 
 

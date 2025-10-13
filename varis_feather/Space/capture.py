@@ -139,6 +139,12 @@ class CaptureStagePose:
     normals_image_path: Path | None = None
     anchor_image_path: Path | None = None
 
+    gradient_A_image_path: Path | None = None
+    gradient_X_image_path: Path | None = None
+    gradient_Y_image_path: Path | None = None
+    gradient_Z_image_path: Path | None = None
+
+
     # Indices into the OLATCapture.frames array, for frames sharing this stage pose
     frame_indices: np.ndarray = None
     # Index to lookup frames by outgoing direction in sample space
@@ -377,6 +383,17 @@ class VarisCapture:
             name, theta_id, phi_id = match.groups()
         wi_id = (int(theta_id), int(phi_id))
         self._get_stage_pose(wi_id, name=name, create=True).all_lights_image_path = path
+
+    def _handle_file_gradient(self, path: Path, match: re.Match, is_iso=False):
+        if is_iso:
+            name, theta_id, grad_direction = match.groups()
+            phi_id = "0"
+        else:
+            name, theta_id, phi_id, grad_direction = match.groups()
+        assert grad_direction in {"A", "X", "Y", "Z"}, f"Invalid gradient direction {grad_direction}"
+        wi_id = (int(theta_id), int(phi_id))
+        sp = self._get_stage_pose(wi_id, name=name, create=True)
+        setattr(sp, f"gradient_{grad_direction}_image_path", path)
 
     def _handle_file_grad_normals(self, path: Path, match: re.Match, is_iso=False):
         if is_iso:
@@ -832,6 +849,52 @@ class VarisCapture:
             crop_br_yx,
             mask=mask,
         )
+
+    def file_index(self) -> dict[str, Path]:
+        """
+        Returns all files to be uploaded
+        """
+        file_by_local_path = {}
+
+        # Index if present
+        path_index = self.dir_src / "index_frames.csv"
+        if path_index.is_file():
+            file_by_local_path[path_index.name] = path_index
+
+        # Regions
+        path_regions = self.dir_src / "000_subcrops_choice.svg"
+        if path_regions.is_file():
+            file_by_local_path[path_regions.name] = path_regions
+
+        # Caches
+        if regions := getattr(self, "named_region_views", None):
+            for name, region in regions.items():
+                file_by_local_path.update(region.file_index())
+
+        # Poses
+        for sp in self.stage_poses.values():
+            file_by_local_path.update({
+                sp.anchor_image_path.name: sp.anchor_image_path,
+                sp.normals_image_path.name: sp.normals_image_path,
+                
+            })
+
+            for path in [
+                sp.gradient_X_image_path,
+                sp.gradient_Y_image_path,
+                sp.gradient_Z_image_path,
+            ]:
+                if path and path.is_file():
+                    file_by_local_path[path.name] = path                
+
+
+        # Frames
+        for frame in self.frames:
+            file_by_local_path[frame.image_path.name] = frame.image_path
+
+        return file_by_local_path
+
+
 
     @classmethod
     def _normal_remove_invariants(cls, normal_orig, normal_rotated):
