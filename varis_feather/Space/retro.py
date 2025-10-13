@@ -99,7 +99,8 @@ class RetroreflectionCapture(VarisCapture):
             self._load_frames_from_dir_without_index(dir_src)
             self._derive_frame_coordinates()
 
-
+        if drop_outliers:
+            self._drop_outliers()
 
     def _derive_frame_coordinates(self):
 

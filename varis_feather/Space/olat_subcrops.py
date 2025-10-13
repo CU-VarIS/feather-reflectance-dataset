@@ -69,8 +69,12 @@ class OLATRegionView:
             w, h = self.crop_wh
             block_shape = (NUM_ROWS * h, NUM_COLS * w, 3)
 
-            if self._cache_file_path(wiid).is_file():
-                block_cached =  readImage(self._cache_file_path(wiid))
+            cache_path = self._cache_file_path(wiid)
+
+            self.capture.ensure_local_file(cache_path.relative_to(self.capture.dir_src), required=False)
+
+            if cache_path.is_file():
+                block_cached =  readImage(cache_path)
                 assert block_cached.shape == block_shape, f"Block shape mismatch cached={block_cached.shape} expected={block_shape}"
                 self._cache_block_by_wiid[wiid] = block_cached
             elif self._cache_allow_missing:
@@ -87,10 +91,11 @@ class OLATRegionView:
         col = (light_id // 5 - 1) * w
         return cache_block[row:row+h, col:col+w]
 
-    def __getitem__(self, idx: int):
-        wiid = self.frame_wi_index[idx]
-        dmx_id, light_id = self.frame_dmx_light_ids[idx]
-        return np.ascontiguousarray(self._block_slice_view(wiid, dmx_id, light_id))
+    def __getitem__(self, wiid_dmx_light: tuple[int, int, int, int]) -> np.ndarray:
+        # wiid = self.frame_wi_index[idx]
+        # dmx_id, light_id = self.frame_dmx_light_ids[idx]
+        theta_id, phi_id, dmx_id, light_id = wiid_dmx_light
+        return np.ascontiguousarray(self._block_slice_view((theta_id, phi_id), dmx_id, light_id))
 
     def __len__(self):
         return len(self.frame_wi_index)
@@ -242,7 +247,7 @@ class OLATRegionView:
 
     def file_index(self) -> FileIndex:
         """Return all files in the region view."""
-        file_index = FileIndex()
+        file_index = FileIndex(name=self.capture.name, dir_src=self.capture.dir_src)
 
         # Cache files
         for wiid in self.capture.stage_poses:

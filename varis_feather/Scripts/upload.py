@@ -1,6 +1,5 @@
 import asyncio
 from datetime import datetime
-import os
 from pathlib import Path
 
 import aiofiles
@@ -11,8 +10,6 @@ from tqdm import tqdm
 from .. import load_standard_capture
 from ..Paths import SCENES, STORAGE_BUCKET, STORAGE_ID_AND_KEY, STORAGE_URL
 from ..Space.file_index import FileIndex
-
-
 
 
 async def s3_sync_filter_uploads(client, bucket_name: str, prefix: str, remote_to_local: dict[str, Path]) -> list[tuple[str, str, str, int]]:
@@ -53,6 +50,7 @@ async def s3_sync_filter_uploads(client, bucket_name: str, prefix: str, remote_t
 
     return to_upload
 
+
 async def s3_sync_perform_uploads(client, to_upload: list[tuple[str, str, str, int]], num_concurrent_uploads: int = 4):
     """
     Perform uploads of files to S3 bucket.
@@ -86,7 +84,7 @@ async def s3_sync_perform_uploads(client, to_upload: list[tuple[str, str, str, i
 
     async def upload_file(local_path, bucket, remote_path, size):
         async with semaphore:
-            print(f"Uploading {local_path} {size / (1024*1024):.2f} MB")
+            # print(f"Uploading {local_path} {size / (1024*1024):.2f} MB")
             async with aiofiles.open(local_path, 'rb') as f:
                 content = await f.read()
                 # Upload the file
@@ -132,7 +130,7 @@ async def upload(num_concurrent_uploads: int = 4, first: int = 0):
             retro, olat = load_standard_capture(cap_name, olat_kwargs=load_kw)
             t = "rectified" if "stereo" not in cap_name.lower() else "stereov1"
 
-            olat_index = olat.file_index()
+            olat_index = olat.file_index().name_to_srcpath()
             to_upload += await s3_sync_filter_uploads(
                 client,
                 bucket_name=STORAGE_BUCKET,
@@ -142,7 +140,7 @@ async def upload(num_concurrent_uploads: int = 4, first: int = 0):
             num_local += len(olat_index)
 
             if retro:
-                retro_index = retro.file_index()
+                retro_index = retro.file_index().name_to_srcpath()
                 to_upload += await s3_sync_filter_uploads(
                     client,
                     bucket_name=STORAGE_BUCKET,
@@ -169,6 +167,63 @@ async def upload(num_concurrent_uploads: int = 4, first: int = 0):
             return
 
         await s3_sync_perform_uploads(client, to_upload, num_concurrent_uploads=num_concurrent_uploads)
+
+
+
+# async def upload(num_concurrent_uploads: int = 4, first: int = 0):
+
+
+#     to_upload = []
+#     num_local = 0
+
+#     load_kw = dict(
+#         drop_outliers=False,
+#         use_index=False,
+#     )
+
+#     async with get_session().create_client(
+#         "s3",
+#         endpoint_url=STORAGE_URL,
+#         aws_secret_access_key=STORAGE_ID_AND_KEY[1],
+#         aws_access_key_id=STORAGE_ID_AND_KEY[0]
+#     ) as client:
+
+
+#         for cap_name in SCENES:
+#             retro, olat = load_standard_capture(cap_name, olat_kwargs=load_kw)
+#             t = "rectified" if "stereo" not in cap_name.lower() else "stereov1"
+
+#             olat_index = olat.file_index()
+#             retro_index = retro.file_index() if retro else None
+
+#             for index in (olat_index, retro_index):
+#                 if index is not None:
+#                     await index.check_remote_status(client)
+
+#                     to_upload += [
+#                         (str(entry.path_local.resolve()), STORAGE_BUCKET, f"{index.storage_prefix}/{entry.name}", entry.size)
+#                         for entry in index 
+#                         if entry.present_local and entry.differs
+#                     ]
+
+#         print(f"By directory:")
+#         num_per_dir: dict[Path, int] = {}
+#         for local_path, _, _, _ in to_upload:
+#             p = Path(local_path).parent
+#             num_per_dir[p] = num_per_dir.get(p, 0) + 1
+
+#         for p, n in num_per_dir.items():
+#             print(f"  {n} in {p}")
+
+#         print(f"Total local files: {num_local}, cached {num_local - len(to_upload)} to upload: {len(to_upload)}")
+
+#         # Confirmation
+#         ans = input(f"Proceed with upload of {len(to_upload)} files? (y/N) ")
+#         if ans.lower() != "y":
+#             return
+
+#         await s3_sync_perform_uploads(client, to_upload, num_concurrent_uploads=num_concurrent_uploads)
+
 
 
 

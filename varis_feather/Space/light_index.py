@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from functools import cache, cached_property
 from pathlib import Path
+from typing import Collection
 
 import cv2 as cv
 import imageio
@@ -93,14 +94,35 @@ class DomeLightIndex:
     def env_map_image(self):
         return imageio.imread(self.env_map_image_path)
 
-    @cached_property
-    def area_density_correction(self) -> np.ndarray:
+    def area_correction(self, removed: Collection[tuple[int, int]] = frozenset()) -> dict[tuple[int, int], float]:
+        removed = set(removed)
+
+        mask = np.array(
+            [
+                (dmx_id, light_id) not in removed
+                for dmx_id, light_id in self.lights_dmx_and_index
+            ]
+        )
+
         # Calculate the spherical Voronoi diagram:
-        sv = SphericalVoronoi(self.lights_envMapYUp, radius=1, center=np.array([0, 0, 0]))
+        sv = SphericalVoronoi(self.lights_envMapYUp[mask], radius=1, center=np.array([0, 0, 0]))
         # Calculate area of each Voronoi region
         areas = sv.calculate_areas()
-        # Correction is inverse density, averaged around 1
-        return np.mean(areas) / areas
+        # Correction is averaged around 1
+        areas_normalized = areas / np.mean(areas)
+
+        return {
+            tuple(map(int, dmx_index)): float(area)
+            for dmx_index, area in zip(self.lights_dmx_and_index[mask], areas_normalized)
+        }
+
+    # def area_density_correction(self) -> np.ndarray:
+    #     # Calculate the spherical Voronoi diagram:
+    #     sv = SphericalVoronoi(self.lights_envMapYUp, radius=1, center=np.array([0, 0, 0]))
+    #     # Calculate area of each Voronoi region
+    #     areas = sv.calculate_areas()
+    #     # Correction is averaged around 1
+    #     return areas / np.mean(areas)
 
 
     def get_index(self, dmx_id: int, light_id: int) -> int:

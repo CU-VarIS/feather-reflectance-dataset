@@ -45,11 +45,25 @@ We capture 128 retroreflection frames with angles spaced between 0 and 90 degree
 The dataset files are automatically downloaded when needed to a local cache.
 This is by default `{this repo}/dataset` but can be overwritten with env variable `CU_VARIS_FEATHER_DIR` or by setting `feather_dir` in `{this repo}/cu_varis_settings.json`.
 
-### Initialize the capture object
+### Load the captures
 
 ```py
 from varis_feather import load_standard_capture
 from varis_feather.Paths import DIR_DATASET, DIR_PROJECT
+from varis_feather.Utilities.ImageIO import writeImage
 
-retro, olat = load_standard_capture("FeatherBlueJay")
+retro, olat = load_standard_capture("FeatherRedCrownedAmazon")
+
+# Get an example frame
+frame = olat.frames[10]
+img = olat.read_measurement_image(frame)
+writeImage(img, "frame.exr")
+
+# Plot by theta-phi
+fig = olat.plot_crops_in_theta_phi("barb128", pose=(4, 0))
+fig.savefig(f"{olat.name}_theta_phi.png")
 ```
+
+### Notebook example
+
+Please see the notebook example at [example.ipynb](example.ipynb).

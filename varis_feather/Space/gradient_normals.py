@@ -10,7 +10,20 @@ class GradientNormalVisitor(FrameVisitor):
         self.normals: np.ndarray | None = None
 
     def start(self, capture: VarisCapture):
-        pass
+
+        sp = capture.stage_poses[self.wiid]
+
+        removed_lights = set()
+
+        for fr_idx in sp.frame_indices:
+            frame = capture.frames[fr_idx]
+            if not frame.is_valid:
+                removed_lights.add((frame.dmx_id, frame.light_id))
+
+        di = DomeLightIndex.default_instance()
+        self._area_correction = di.area_correction(removed_lights)
+
+
 
     def _accumulate_grad(self, dim: str, contribution: np.ndarray):
         if (acc := self._gradient_accumulators.get(dim)) is None:
@@ -19,13 +32,11 @@ class GradientNormalVisitor(FrameVisitor):
         acc += contribution
 
     def visit_frame(self, frame: CaptureFrame, img: np.ndarray):
-        if frame.wiid != self.wiid:
+        if frame.wiid != self.wiid or not frame.is_valid:
             return
-        
-        di = DomeLightIndex.default_instance()
-        
+                
         # Correct by inverse density
-        corr = di.area_density_correction[di.get_index(frame.dmx_id, frame.light_id)]
+        corr = self._area_correction[(frame.dmx_id, frame.light_id)]
 
         for dim_i, dim_name in enumerate(("x", "y", "z")):
             weight = (0.5*frame.sample_wo[dim_i] + 0.5) * corr

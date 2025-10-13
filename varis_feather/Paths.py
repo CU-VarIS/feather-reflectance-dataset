@@ -13,18 +13,19 @@ DIR_DATASET = Path(os.getenv("CU_VARIS_FEATHER_DIR", settings_content.get("feath
 SCENES = [
     "Spectralon",
     "FeatherHyacinthMacaw",
-    "ButterflySwallowtail",
-    "FeatherBlackChinnedHummingbird", # incomplete!
-    "FeatherBlackVulture",
-    # "FeatherBlueJay", # weird shape
-    "FeatherGreatBlueHeron",
-    "FeatherGreatHornedOwl",
-    "FeatherNorthernFlicker",
-    # "FeatherNorthernFlickerVentral", # weird shape
-    "FeatherOstrich",
     "FeatherRedCrownedAmazon",
-    # "FeatherRedTailedHawk",
+    "FeatherOstrich",
     "FeatherRockDove",
+    "FeatherBlackVulture",
+    "ButterflySwallowtail",
+    # "FeatherBlackChinnedHummingbird", # incomplete!
+    # "FeatherBlueJay", # weird shape
+    # "FeatherGreatBlueHeron",
+    # "FeatherGreatHornedOwl",
+    # "FeatherNorthernFlicker",
+    # "FeatherNorthernFlickerVentral", # weird shape
+
+    # "FeatherRedTailedHawk",
 ]
 
 

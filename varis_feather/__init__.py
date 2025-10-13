@@ -2,6 +2,8 @@
 
 from typing import Any
 
+from varis_feather.Space.file_index import FileIndex
+
 from .Paths import DIR_DATASET
 from .Space.olat import OLATCapture, ThetaDistribution
 from .Space.retro import RetroreflectionCapture
@@ -18,6 +20,10 @@ def load_standard_capture(cap_name, mode: str = "rectified", retro_variant="128x
         dir_retro = DIR_DATASET / "captures" / cap_name / f"retro_{retro_variant}_{mode}"
         dir_olat = DIR_DATASET / "captures" / cap_name / f"olat_{olat_variant}_{mode}"
 
+
+    if (olat_kwargs or {}).get("use_index", True):
+        FileIndex.download_starter(cap_name, dir_olat)
+
     olat = OLATCapture(
         dir_src = dir_olat,
         num_theta_i=8,
@@ -25,13 +31,15 @@ def load_standard_capture(cap_name, mode: str = "rectified", retro_variant="128x
         # theta_distribution=ThetaDistribution(mode=ThetaDistribution.MODE_UNIFORM, offset_rad=np.deg2rad(16.35)),
         # frame_below_horizon="remove",
         theta_distribution=ThetaDistribution(mode=ThetaDistribution.MODE_UNIFORM),
-        frame_below_horizon="ignore",
         **(olat_kwargs or {}),
     )
     print(olat.report())
 
 
     try:
+        if (retro_kwargs or {}).get("use_index", True):
+            FileIndex.download_starter(cap_name, dir_retro)
+
         retro = RetroreflectionCapture(
             dir_src = dir_retro,
             num_theta_i=128,

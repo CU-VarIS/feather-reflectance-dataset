@@ -6,6 +6,7 @@ from multiprocessing.dummy import Pool as ThreadPool
 from pathlib import Path
 from typing import Any, Callable, Collection, Literal, Optional, Union
 from abc import ABC, abstractmethod
+from urllib.request import urlretrieve
 
 import cv2 as cv
 import einops
@@ -17,6 +18,8 @@ from pandas import DataFrame, read_csv
 from scipy.spatial import KDTree
 from scipy.spatial.transform import Rotation
 from tqdm import tqdm
+
+from varis_feather.Paths import STORAGE_URL, STORAGE_BUCKET
 
 from .file_index import FileIndex, FileIndexEntry
 from ..Utilities.ImageIO import RGL_tonemap_uint8, readImage, writeImage
@@ -159,6 +162,12 @@ class CaptureStagePose:
     alignment_transform: Optional["itk.ParameterObject"] = None
     alignment_transform_paths: list[Path] | None = None
 
+    capture: Optional["VarisCapture"] = None
+
+    @cached_property
+    def frames(self) -> list[CaptureFrame]:
+        return [self.capture.frames[i] for i in self.frame_indices]
+
     @property
     def wiid(self):
         return (self.theta_i_index, self.phi_i_index)
@@ -169,7 +178,7 @@ class CaptureStagePose:
         Photo with all lights on in JPG format, captured for each theta-phi pair.
         Loaded on demand when first accessed and then cached.
         """
-        return self._manual_homography_apply(readImage(str(self.all_lights_image_path)))
+        return self._manual_homography_apply(readImage(self.capture.ensure_local_file(self.all_lights_image_path)))
 
     @cached_property
     def normals_image(self) -> np.ndarray:
@@ -177,7 +186,7 @@ class CaptureStagePose:
         Normals estimated using gradient patterns, captured for each theta-phi pair.
         Loaded on demand when first accessed and then cached.
         """
-        return self._manual_homography_apply(readImage(str(self.normals_image_path)))
+        return self._manual_homography_apply(readImage(self.capture.ensure_local_file((self.normals_image_path))))
     
     @cached_property
     def anchor_image(self) -> np.ndarray:
@@ -185,7 +194,7 @@ class CaptureStagePose:
         Normals estimated using gradient patterns, captured for each theta-phi pair.
         Loaded on demand when first accessed and then cached.
         """
-        return self._manual_homography_apply(readImage(str(self.anchor_image_path)))
+        return self._manual_homography_apply(readImage(self.capture.ensure_local_file((self.anchor_image_path))))
 
     @cached_property
     def disparity_direction(self) -> np.ndarray:
@@ -229,7 +238,7 @@ class CaptureStagePose:
     def normals_smooth(self) -> np.ndarray:
         return self.normals_smooth_configurable()
 
-    def normals_smooth_configurable(self, ksize:int = 5, steps:int = 2) -> np.ndarray:
+    def normals_smooth_configurable(self, ksize:int = 3, steps:int = 1) -> np.ndarray:
         img_normals = self.normals_image
         img_normals_smooth = img_normals
         for s in range(steps):
@@ -359,6 +368,7 @@ class VarisCapture:
             sp = CaptureStagePose(
                 theta_i_index=theta_i,
                 phi_i_index=phi_i,
+                capture=self,
             )
             self.stage_poses[wi_id] = sp
 
@@ -601,7 +611,7 @@ class VarisCapture:
         pix_per_mm: float = 128 / 7,
         mm_per_tile: float = 7,
     ):
-        self.name = "uninitialized"
+        self.name = dir_src.parents[0].name
         self.dir_src = dir_src
         self._set_angles(num_theta_i, num_phi_i, theta_distribution=theta_distribution)
         self.stage_poses: dict[tuple[int, int], CaptureStagePose] = {}
@@ -613,6 +623,10 @@ class VarisCapture:
 
         self._unmatched_files = {}
 
+
+    @cached_property
+    def storage_prefix(self) -> str:
+        return f"{self.name}/{self.dir_src.name}"
 
     def tile_to_pix(self, tx: float, ty: float) -> tuple[int, int]:
         r = self.mm_per_tile * self.pix_per_mm
@@ -680,13 +694,30 @@ class VarisCapture:
         if self.named_region_views:
             print(f"Loaded regions: {list(self.named_region_views.keys())}")
 
+    def ensure_local_file(self, path_local: Path, required = True) -> Path:
+        path_full = self.dir_src / path_local if not path_local.is_absolute() else path_local
+        
+        if not path_full.is_file():
+            url = f"{STORAGE_URL}/{STORAGE_BUCKET}/{self.storage_prefix}/{path_local}"
+            print(f"Downloading {url} to {path_full}")
+            try:
+                path_full.parent.mkdir(parents=True, exist_ok=True)
+                urlretrieve(url, path_full)
+            except Exception as e:
+                if required:
+                    raise RuntimeError(f"Failed to download {url} to {path_full}") from e
+                else:
+                    print(f"Warning: Failed to download {url} to {path_full}: {e}")
+        
+        return path_full
+
     def read_measurement_image(self, frame: Union[CaptureFrame, int], cache=False) -> np.ndarray:
         frame = frame if isinstance(frame, CaptureFrame) else self.frames[int(frame)]
 
         if cache and frame.image_cache is not None:
             return frame.image_cache
 
-        img = readImage(frame.image_path)
+        img = readImage(self.ensure_local_file(frame.image_path))
 
         if frame.brightness_correction != 1.0:
             img *= frame.brightness_correction
@@ -771,10 +802,22 @@ class VarisCapture:
      
 
     def _update_table_from_frames(self):
-        self.frame_table = DataFrame.from_records(
-            data=[f.asdict() for f in self.frames],
-        )
-        self.frame_table.set_index(["theta_id", "phi_id", "dmx_id", "light_id"], drop=False, inplace=True)
+        try:
+            self.frame_table = DataFrame.from_records(
+                data=[f.asdict() for f in self.frames],
+            )
+            self.frame_table.set_index(["theta_id", "phi_id", "dmx_id", "light_id"], drop=False, inplace=True)
+        except Exception as e:
+            raise ValueError(f"Frame for {self.name} was {self.frame_table}") from e
+        
+    def _drop_outliers(self):
+        # Select only rows where is_valid is True
+        self.frame_table_full = self.frame_table
+        self.frame_table = self.frame_table[self.frame_table["is_valid"]]
+        self.frames = [CaptureFrame.from_row(row) for _, row in self.frame_table.iterrows()]
+
+        print(f"Dropped outliers, {len(self.frame_table)} frames out of {len(self.frame_table_full)} remaining")
+
 
     def _derive_frame_coordinates(self):
         """
@@ -854,7 +897,7 @@ class VarisCapture:
         """
         Returns all files to be uploaded
         """
-        file_index = FileIndex()
+        file_index = FileIndex(name=self.name, dir_src=self.dir_src)
 
         # Index if present
         file_index.add(self.dir_src / "index_frames.csv", is_source=False)
@@ -1090,7 +1133,7 @@ class VarisCapture:
         return img_demo
 
     def plot_board_gradient_normals(self, path_out: Path = None):
-        from moviepy.editor import ImageSequenceClip
+        from moviepy import ImageSequenceClip
 
         path_out = path_out or self.dir_src/"003_board_normals.mp4"
         dir_frames = path_out.parent / path_out.stem
@@ -1155,11 +1198,10 @@ class VarisCapture:
             view, 
             pose: Union[Literal["all"], tuple[int, int]] = "all", 
             tonemap: bool=True, 
-            tile_px:float=20, 
+            tile_px:float=32, 
             allow_symmetrization: bool = False, 
             show_outliers: bool = False,
             out_path_override: str | Path | None = None,
-            correction_factors = None,
     ):
         seaborn.set_theme()
         fig, ax = pyplot.subplots(1, 1, figsize=(20, 10))
@@ -1204,10 +1246,9 @@ class VarisCapture:
         ax.scatter(phis, thetas)
 
 
-        color_stack = np.stack([view[fr_ind] for fr_ind in sp_indices], axis=0)
+        frames = [self.frames[fr_ind] for fr_ind in sp_indices]
 
-        if correction_factors is not None:
-            color_stack *= correction_factors[:, None, None, None]
+        color_stack = np.stack([view[(fr.wiid[0], fr.wiid[1], fr.dmx_id, fr.light_id)] for fr in frames], axis=0)
 
         # print(color_stack.shape)
         if tonemap:
@@ -1215,9 +1256,8 @@ class VarisCapture:
         else:
             color_stack = (np.clip(color_stack, 0, 1)*255).astype(np.uint8)
 
-        for fr_ind, theta, phi, crop_img in zip(sp_indices, thetas, phis, color_stack):
+        for fr, theta, phi, crop_img in zip(frames, thetas, phis, color_stack):
             plot_pos = (phi, theta)
-            fr = self.frames[fr_ind]
 
             
 
