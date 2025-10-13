@@ -14,7 +14,7 @@ SCENES = [
     "Spectralon",
     "FeatherHyacinthMacaw",
     "ButterflySwallowtail",
-    ## "FeatherBlackChinnedHummingbird", # incomplete!
+    "FeatherBlackChinnedHummingbird", # incomplete!
     "FeatherBlackVulture",
     # "FeatherBlueJay", # weird shape
     "FeatherGreatBlueHeron",
