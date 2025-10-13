@@ -10,22 +10,9 @@ from tqdm import tqdm
 
 from .. import load_standard_capture
 from ..Paths import SCENES, STORAGE_BUCKET, STORAGE_ID_AND_KEY, STORAGE_URL
+from ..Space.file_index import FileIndex
 
 
-_stat_cache: dict[Path, os.stat_result] = {}
-
-def stat_with_caching(path: Path):
-    """Stat a file, but use os.scandir to cache the directory listing for speedup.
-    Stat appears to be slow on my mount.
-    """
-    path = path.expanduser().resolve()
-
-    if path not in _stat_cache:
-        print("stat ", path.parent)
-        for entry in os.scandir(path.parent):
-            _stat_cache[Path(entry.path)] = entry.stat()
-    
-    return _stat_cache[path]
 
 
 async def s3_sync_filter_uploads(client, bucket_name: str, prefix: str, remote_to_local: dict[str, Path]) -> list[tuple[str, str, str, int]]:
@@ -51,7 +38,7 @@ async def s3_sync_filter_uploads(client, bucket_name: str, prefix: str, remote_t
         if not local_path.exists():
             continue
 
-        local_stat = stat_with_caching(local_path)
+        local_stat = FileIndex.stat(local_path)
         local_mod_date = datetime.fromtimestamp(local_stat.st_mtime, tz = UTC)
         local_size = local_stat.st_size
 
@@ -99,6 +86,7 @@ async def s3_sync_perform_uploads(client, to_upload: list[tuple[str, str, str, i
 
     async def upload_file(local_path, bucket, remote_path, size):
         async with semaphore:
+            print(f"Uploading {local_path} {size / (1024*1024):.2f} MB")
             async with aiofiles.open(local_path, 'rb') as f:
                 content = await f.read()
                 # Upload the file
@@ -123,6 +111,7 @@ async def s3_sync_perform_uploads(client, to_upload: list[tuple[str, str, str, i
 
 
 async def upload(num_concurrent_uploads: int = 4, first: int = 0):
+
 
     to_upload = []
     num_local = 0
@@ -150,15 +139,27 @@ async def upload(num_concurrent_uploads: int = 4, first: int = 0):
                 prefix=f"{olat.name}/olat_iso_{t}", 
                 remote_to_local=olat_index,
             )
-            retro_index = retro.file_index()
-            to_upload += await s3_sync_filter_uploads(
-                client,
-                bucket_name=STORAGE_BUCKET,
-                prefix=f"{retro.name}/retro_iso_{t}",
-                remote_to_local=retro_index,
-            )
+            num_local += len(olat_index)
 
-            num_local += len(olat_index) + len(retro_index)
+            if retro:
+                retro_index = retro.file_index()
+                to_upload += await s3_sync_filter_uploads(
+                    client,
+                    bucket_name=STORAGE_BUCKET,
+                    prefix=f"{retro.name}/retro_iso_{t}",
+                    remote_to_local=retro_index,
+                )
+
+                num_local += len(retro_index)
+
+        print(f"By directory:")
+        num_per_dir: dict[Path, int] = {}
+        for local_path, _, _, _ in to_upload:
+            p = Path(local_path).parent
+            num_per_dir[p] = num_per_dir.get(p, 0) + 1
+
+        for p, n in num_per_dir.items():
+            print(f"  {n} in {p}")
 
         print(f"Total local files: {num_local}, cached {num_local - len(to_upload)} to upload: {len(to_upload)}")
 

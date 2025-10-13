@@ -2,7 +2,6 @@ import os
 import re
 from dataclasses import dataclass
 from functools import cached_property, lru_cache
-# from multiprocessing.pool import ThreadPool
 from multiprocessing.dummy import Pool as ThreadPool
 from pathlib import Path
 from typing import Any, Callable, Collection, Literal, Optional, Union
@@ -19,7 +18,7 @@ from scipy.spatial import KDTree
 from scipy.spatial.transform import Rotation
 from tqdm import tqdm
 
-from ..Cleanup.board_markers_brightness import capture_calculate_marker_brightness
+from .file_index import FileIndex, FileIndexEntry
 from ..Utilities.ImageIO import RGL_tonemap_uint8, readImage, writeImage
 
 
@@ -32,7 +31,7 @@ class ThetaDistribution:
         self.mode = mode
         self.offset_rad = offset_rad
 
-    
+
 
 @dataclass
 class CaptureFrame:
@@ -139,7 +138,6 @@ class CaptureStagePose:
     normals_image_path: Path | None = None
     anchor_image_path: Path | None = None
 
-    gradient_A_image_path: Path | None = None
     gradient_X_image_path: Path | None = None
     gradient_Y_image_path: Path | None = None
     gradient_Z_image_path: Path | None = None
@@ -390,7 +388,7 @@ class VarisCapture:
             phi_id = "0"
         else:
             name, theta_id, phi_id, grad_direction = match.groups()
-        assert grad_direction in {"A", "X", "Y", "Z"}, f"Invalid gradient direction {grad_direction}"
+        assert grad_direction in {"X", "Y", "Z"}, f"Invalid gradient direction {grad_direction}"
         wi_id = (int(theta_id), int(phi_id))
         sp = self._get_stage_pose(wi_id, name=name, create=True)
         setattr(sp, f"gradient_{grad_direction}_image_path", path)
@@ -658,9 +656,11 @@ class VarisCapture:
 
     def load_named_regions(self, dir_src: Path, extract=False, write_small_files=False):
         from .olat_subcrops import OLATPixelMaskView, OLATRegionView
+        dir_cache = self.dir_src / "cache"
+
         path_svg = dir_src / "000_subcrops_choice.svg"
         if path_svg.is_file():
-            regions = OLATRegionView.regions_from_svg(self, path_svg, dir_storage=dir_src / "cache")                
+            regions = OLATRegionView.regions_from_svg(self, path_svg, dir_storage=dir_cache)
             self.named_region_views.update({r.region_name: r for r in regions})
         
         region_masks = {}
@@ -674,7 +674,7 @@ class VarisCapture:
             mask_image = readImage(region_mask_file)
             mask = mask_image[:, :, 0] < 50
             self.named_region_views[region_name] = OLATPixelMaskView(
-                region_name, mask, dir_src, self,
+                region_name, mask, dir_cache, self,
             )
 
         if self.named_region_views:
@@ -850,49 +850,41 @@ class VarisCapture:
             mask=mask,
         )
 
-    def file_index(self) -> dict[str, Path]:
+    def file_index(self) -> FileIndex:
         """
         Returns all files to be uploaded
         """
-        file_by_local_path = {}
+        file_index = FileIndex()
 
         # Index if present
-        path_index = self.dir_src / "index_frames.csv"
-        if path_index.is_file():
-            file_by_local_path[path_index.name] = path_index
+        file_index.add(self.dir_src / "index_frames.csv", is_source=False)
 
         # Regions
-        path_regions = self.dir_src / "000_subcrops_choice.svg"
-        if path_regions.is_file():
-            file_by_local_path[path_regions.name] = path_regions
+        file_index.add(self.dir_src / "000_subcrops_choice.svg", is_source=True)
 
         # Caches
         if regions := getattr(self, "named_region_views", None):
             for name, region in regions.items():
-                file_by_local_path.update(region.file_index())
+                file_index.update(region.file_index())
 
         # Poses
         for sp in self.stage_poses.values():
-            file_by_local_path.update({
-                sp.anchor_image_path.name: sp.anchor_image_path,
-                sp.normals_image_path.name: sp.normals_image_path,
-                
-            })
-
             for path in [
+                sp.all_lights_image_path,
+                sp.normals_image_path,
+                sp.anchor_image_path,
                 sp.gradient_X_image_path,
                 sp.gradient_Y_image_path,
                 sp.gradient_Z_image_path,
             ]:
-                if path and path.is_file():
-                    file_by_local_path[path.name] = path                
+                file_index.add(path, is_source=True)
 
 
         # Frames
         for frame in self.frames:
-            file_by_local_path[frame.image_path.name] = frame.image_path
+            file_index.add(frame.image_path, is_source=True)
 
-        return file_by_local_path
+        return file_index
 
 
 

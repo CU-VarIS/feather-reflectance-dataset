@@ -11,7 +11,7 @@ from tqdm import tqdm
 from ..Utilities.ImageIO import readImage, writeImage
 from .capture import CaptureFrame, FrameVisitor, FunctionFrameVisitor, VarisCapture
 from .retro import RetroreflectionCapture
-
+from .file_index import FileIndex
 
 @dataclass
 class BRDFMeasurementBundle:
@@ -240,26 +240,21 @@ class OLATRegionView:
     #     for region in regions:
     #         region.save()
 
-    def file_index(self) -> dict[str, Path]:
+    def file_index(self) -> FileIndex:
         """Return all files in the region view."""
-        file_by_local_path = {}
+        file_index = FileIndex()
 
         # Cache files
         for wiid in self.capture.stage_poses:
             cache_path = self._cache_file_path(wiid)
-            if cache_path.is_file():
-                cache_path_relative = cache_path.relative_to(self.capture.dir_src)
-                file_by_local_path[str(cache_path_relative)] = cache_path
-                print("Added cache file:", cache_path_relative)
-            else:
-                print("Cache file missing:", cache_path)
+            cache_path_relative = cache_path.relative_to(self.capture.dir_src)
+            file_index.add(cache_path, name=str(cache_path_relative), is_source=False)
 
         # Materials
         mat_path = self.capture.dir_src / "006_materials_manual" / f"{self.region_name}.bsdf"
-        if mat_path.is_file():
-            file_by_local_path[str(mat_path.relative_to(self.capture.dir_src))] = mat_path
+        file_index.add(mat_path, name=str(mat_path.relative_to(self.capture.dir_src)), is_source=False)
 
-        return file_by_local_path
+        return file_index
 
 
 

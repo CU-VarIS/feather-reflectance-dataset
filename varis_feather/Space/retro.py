@@ -89,6 +89,7 @@ class RetroreflectionCapture(VarisCapture):
             use_index=True,
             frame_below_horizon="error",
             theta_distribution=ThetaDistribution(mode=ThetaDistribution.MODE_U_TO_THETA),
+            drop_outliers=False,
 
         ): #, naming_all_light=RetroAllLightNaming.JUST_JPG):
         dir_src = Path(dir_src)

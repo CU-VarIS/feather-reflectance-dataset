@@ -38,3 +38,18 @@ The retroreflection image sequence provides a preview of material reflectance cr
 We capture 128 retroreflection frames with angles spaced between 0 and 90 degrees. 
 
 
+## Using the dataset
+
+### Cache location
+
+The dataset files are automatically downloaded when needed to a local cache.
+This is by default `{this repo}/dataset` but can be overwritten with env variable `CU_VARIS_FEATHER_DIR` or by setting `feather_dir` in `{this repo}/cu_varis_settings.json`.
+
+### Initialize the capture object
+
+```py
+from varis_feather import load_standard_capture
+from varis_feather.Paths import DIR_DATASET, DIR_PROJECT
+
+retro, olat = load_standard_capture("FeatherBlueJay")
+```

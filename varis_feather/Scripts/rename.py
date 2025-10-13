@@ -2,8 +2,7 @@
 from pathlib import Path
 
 from ..Paths import DIR_DATASET
-
-
+from .resolution_unify import _high_res_capture_names
 
 def rename_captures(dir_category: Path, fmt_full: str, fmt_rectified: str):
     renames = []
@@ -17,7 +16,8 @@ def rename_captures(dir_category: Path, fmt_full: str, fmt_rectified: str):
             continue
 
         if dir_rectified.is_dir():
-            renames.append((dir_rectified, Path(dir_capture.name) / fmt_rectified))
+            variant_name = f"{fmt_rectified}HighRes" if dir_capture.name in _high_res_capture_names else fmt_rectified
+            renames.append((dir_rectified, Path(dir_capture.name) / variant_name))
 
         if any(f.is_file() for f in dir_capture.iterdir()):
             renames.append((dir_capture, Path(dir_capture.name) / fmt_full))

@@ -3,7 +3,12 @@ import os, json
 
 DIR_PROJECT = Path(__file__).absolute().parents[1]
 
-DIR_DATASET = DIR_PROJECT / "dataset"
+if (settings_path := DIR_PROJECT / "cu_varis_settings.json").is_file():
+    settings_content = json.loads(settings_path.read_text())
+else:
+    settings_content = {}
+
+DIR_DATASET = Path(os.getenv("CU_VARIS_FEATHER_DIR", settings_content.get("feather_dir", DIR_PROJECT / "dataset"))).resolve()
 
 SCENES = [
     "Spectralon",
@@ -11,34 +16,24 @@ SCENES = [
     "ButterflySwallowtail",
     ## "FeatherBlackChinnedHummingbird", # incomplete!
     "FeatherBlackVulture",
-    "FeatherBlueJay",
+    # "FeatherBlueJay", # weird shape
     "FeatherGreatBlueHeron",
     "FeatherGreatHornedOwl",
     "FeatherNorthernFlicker",
-    "FeatherNorthernFlickerVentral",
+    # "FeatherNorthernFlickerVentral", # weird shape
     "FeatherOstrich",
     "FeatherRedCrownedAmazon",
-    "FeatherRedTailedHawk",
+    # "FeatherRedTailedHawk",
     "FeatherRockDove",
 ]
+
 
 
 STORAGE_BUCKET = "cu-varis-feather-v1-dev"
 STORAGE_URL = "https://s3.us-east-005.backblazeb2.com"
 
-STORAGE_ID_AND_KEY = (None, None)
-
-# Try getting key from file
-if (key_path := DIR_PROJECT / "storage_key.json").is_file():
-    content = json.loads(key_path.read_text())
-    STORAGE_ID_AND_KEY = (
-        content["key_id"],
-        content["key"],
-    )
-# Try getting from env
-else:
-    STORAGE_ID_AND_KEY = (
-        os.getenv("STORAGE_KEY_ID", None),
-        os.getenv("STORAGE_KEY", None),
-    )
-
+# Try getting key from env or file
+STORAGE_ID_AND_KEY = (
+    os.getenv("CU_VARIS_STORAGE_KEY_ID", settings_content.get("key_id", None)),
+    os.getenv("CU_VARIS_STORAGE_KEY", settings_content.get("key", None)),
+)
