@@ -38,7 +38,7 @@ def _correct_capture(capture: VarisCapture, num_workers: int = 8):
 
 def process_scene(scene: str, num_workers: int = 8):
     print(f"Post-capture for scene {scene}")
-    kw = dict(use_index=False)
+    kw = dict(use_index=False, drop_outliers=False)
 
     retro, olat = load_standard_capture(scene, retro_kwargs=kw, olat_kwargs=kw)
     
@@ -69,4 +69,5 @@ def post_capture(scenes: str = "all", num_workers: int = 8):
         try:
             process_scene(sc, num_workers=num_workers)
         except Exception as e:
-            print(f"Failed to process scene {sc}: {e}")
+            # print(f"Failed to process scene {sc}: {e}")
+            raise e

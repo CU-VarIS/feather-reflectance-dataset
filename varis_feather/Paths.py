@@ -17,7 +17,7 @@ SCENES = [
     "FeatherOstrich",
     "FeatherRockDove",
     "FeatherBlackVulture",
-    "ButterflySwallowtail",
+    "Swallowtail",
     # "FeatherBlackChinnedHummingbird", # incomplete!
     # "FeatherBlueJay", # weird shape
     # "FeatherGreatBlueHeron",

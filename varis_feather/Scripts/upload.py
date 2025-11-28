@@ -139,16 +139,16 @@ async def upload(num_concurrent_uploads: int = 4, first: int = 0):
             )
             num_local += len(olat_index)
 
-            if retro:
-                retro_index = retro.file_index().name_to_srcpath()
-                to_upload += await s3_sync_filter_uploads(
-                    client,
-                    bucket_name=STORAGE_BUCKET,
-                    prefix=f"{retro.name}/retro_iso_{t}",
-                    remote_to_local=retro_index,
-                )
+            # if retro:
+            retro_index = retro.file_index().name_to_srcpath()
+            to_upload += await s3_sync_filter_uploads(
+                client,
+                bucket_name=STORAGE_BUCKET,
+                prefix=f"{retro.name}/retro_iso_{t}",
+                remote_to_local=retro_index,
+            )
 
-                num_local += len(retro_index)
+            num_local += len(retro_index)
 
         print(f"By directory:")
         num_per_dir: dict[Path, int] = {}

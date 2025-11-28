@@ -29,7 +29,6 @@ def load_standard_capture(cap_name, mode: str = "rectified", retro_variant="128x
         num_theta_i=8,
         num_phi_i=1,    
         # theta_distribution=ThetaDistribution(mode=ThetaDistribution.MODE_UNIFORM, offset_rad=np.deg2rad(16.35)),
-        # frame_below_horizon="remove",
         theta_distribution=ThetaDistribution(mode=ThetaDistribution.MODE_UNIFORM),
         **(olat_kwargs or {}),
     )

@@ -73,10 +73,8 @@ class OLATCapture(VarisCapture):
             dir_src: Path,
             num_theta_i: int = 8,
             num_phi_i: int = 1,
-            frame_below_horizon="error",
             symmetrize_light_directions_if_isotropic=True,
             conflate_phis=False,
-            white_level_analysis=True,
             drop_outliers=True,
             use_index=True,
             theta_distribution: ThetaDistribution=ThetaDistribution(mode=ThetaDistribution.MODE_ARC_COS, offset_rad=0.0),
@@ -88,14 +86,17 @@ class OLATCapture(VarisCapture):
         self._symmetrize_light_directions_if_isotropic = symmetrize_light_directions_if_isotropic
 
         if (not use_index) or  not self.load_index():
+        # if True:
             self._load_frames_from_dir_without_index(dir_src)
             self._derive_frame_coordinates()
+
+        # if (not use_index) or  not self.load_index():
+            # pass
 
         if drop_outliers:
             self._drop_outliers()
 
         self._build_stage_pose_index()
-
 
         # if drop_outliers:
             # self._drop_outliers()
