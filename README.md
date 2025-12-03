@@ -9,12 +9,32 @@ Our motivation is to supply a collection of appearance data for opening new line
 
 This effort is powered by Clemson University's [Bob Campbell Geology Museum](Bob Campbell Geology Museum) and the [School of Computing's Visual Computing Division](https://computing.clemson.edu/vcl/).
 
-
 [Clemson World magazine article related to the VarIS capture system](https://clemson.world/keeping-it-real/)
 
-[Eurographics STAG: VarIS: Variable Illumination Sphere for Facial Capture, Model Scanning, and Spatially Varying Appearance Acquisition.](https://diglib.eg.org/items/e7785cfc-6ab5-48fa-8eb4-408b744fc437)
-
 Please contact Eric Patterson, Daljit Singh Dhillon, or N. Adam Smith at Clemson University for further details.
+
+## Papers
+
+
+**A Dataset and Analysis of Reflectance and Structural Imaging of Feathers**  
+CV4Animals workshop at CVPR 2025  
+<https://drive.google.com/file/d/11EpmqstGRZ2UM8aFfD944qN5Ndwu8fJN/view>
+
+
+**Capturing the Complexity of Spatially Varying Surfaces with Adaptive Parameterization and Distribution Metrics**  
+22nd ACM SIGGRAPH European Conference on Visual Media Production (**CVMP 2025**)  
+<https://dl.acm.org/doi/10.1145/3756863.3769711>
+
+
+**VarIS: Variable Illumination Sphere for Facial Capture, Model Scanning, and Spatially Varying Appearance Acquisition**  
+Eurographics STAG 2023  
+<https://diglib.eg.org/items/e7785cfc-6ab5-48fa-8eb4-408b744fc437>
+
+
+
+
+
+
 
 ## Measurement Setup
 
